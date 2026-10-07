@@ -16,6 +16,8 @@ from db.models import Server, User, UserServer
 from core.server_manager import (
     import_existing_server,
     deploy_fresh,
+    get_server_status,
+    edit_server,
     ImportError_,
 )
 from core.ssh_client import SSHError
@@ -149,6 +151,8 @@ def servers_menu() -> None:
                 "Список серверов",
                 "Добавить новый сервер",
                 "Импортировать существующий",
+                "Проверить статус сервера",
+                "Редактировать сервер",
                 "Удалить сервер из БД",
                 "Назад",
             ],
@@ -165,6 +169,12 @@ def servers_menu() -> None:
             _pause()
         elif choice == "Импортировать существующий":
             _servers_import()
+            _pause()
+        elif choice == "Проверить статус сервера":   # ← НОВАЯ ОБРАБОТКА
+            _servers_status()
+            _pause()
+        elif choice == "Редактировать сервер":       # ← НОВАЯ ОБРАБОТКА
+            _servers_edit()
             _pause()
         elif choice == "Удалить сервер из БД":
             _servers_remove()
@@ -193,6 +203,171 @@ def _servers_list() -> None:
         )
     console.print(table)
 
+def _servers_status() -> None:
+    choices = _server_choices()
+    if not choices:
+        console.print("[yellow]Серверов нет.[/yellow]")
+        return
+    sid = questionary.select(
+        "Какой сервер проверить?",
+        choices=choices,
+        style=CUSTOM_STYLE,
+        instruction="(↑↓ — навигация, Enter — выбрать)",
+    ).ask()
+    if sid is None:
+        return
+
+    try:
+        with console.status(f"[cyan]Проверяю сервер id={sid}...[/cyan]"):
+            result = get_server_status(sid)
+    except Exception as e:
+        _error(str(e))
+        return
+
+    if not result.get("xray_installed"):
+        _error(result.get("error") or "Xray не установлен.")
+        return
+
+    table = Table(title=f"Статус: {result['name']}", show_lines=True)
+    table.add_column("Параметр", style="cyan")
+    table.add_column("Значение")
+
+    status_color = "green" if result["service_active"] == "active" else "red"
+    table.add_row("Host", f"{result['host']}:{result['port']}")
+    table.add_row(
+        "Служба",
+        f"[{status_color}]{result['service_active']}[/{status_color}]",
+    )
+    table.add_row("Версия Xray", result["version"])
+    table.add_row("Uptime", result["uptime"])
+    table.add_row("Клиентов в конфиге", str(result["clients_count"]))
+    table.add_row(
+        "Конфиг",
+        "[green]OK[/green]" if result["config_ok"] else "[red]ошибка[/red]",
+    )
+    if result.get("error"):
+        table.add_row("[red]Ошибка[/red]", f"[red]{result['error']}[/red]")
+
+    console.print(table)
+
+def _servers_edit() -> None:
+    choices = _server_choices()
+    if not choices:
+        console.print("[yellow]Серверов нет.[/yellow]")
+        return
+    sid = questionary.select(
+        "Какой сервер редактировать?",
+        choices=choices,
+        style=CUSTOM_STYLE,
+    ).ask()
+    if sid is None:
+        return
+
+    # Загрузим текущие параметры
+    session = get_session()
+    try:
+        server = session.query(Server).filter_by(id=sid).one_or_none()
+        if not server:
+            _error(f"Сервер ID={sid} не найден.")
+            return
+        current_port = server.xray_port
+        current_dest = server.reality_dest
+        current_sni = ", ".join(json.loads(server.reality_server_names or "[]"))
+    finally:
+        session.close()
+
+    console.rule(f"[bold]Редактирование: {server.name}[/bold]")
+    console.print(f"[dim]Текущий порт: {current_port}[/dim]")
+    console.print(f"[dim]Текущий dest: {current_dest}[/dim]")
+    console.print(f"[dim]Текущий SNI:  {current_sni}[/dim]\n")
+
+    # Спрашиваем, что менять
+    field = questionary.select(
+        "Что редактировать?",
+        choices=[
+            "Порт",
+            "dest (маскировочный сайт)",
+            "SNI (serverNames)",
+            "Отмена",
+        ],
+        style=CUSTOM_STYLE,
+    ).ask()
+
+    if field is None or field == "Отмена":
+        return
+
+    new_port = None
+    new_dest = None
+    new_sni = None
+
+    if field == "Порт":
+        new_port_str = questionary.text(
+            "Новый порт:",
+            default=str(current_port),
+            style=CUSTOM_STYLE,
+        ).ask()
+        try:
+            new_port = int(new_port_str)
+        except (ValueError, TypeError):
+            _error("Порт должен быть числом.")
+            return
+    elif field == "dest (маскировочный сайт)":
+        new_dest = questionary.text(
+            "Новый dest (например, www.yahoo.com:443):",
+            default=current_dest,
+            style=CUSTOM_STYLE,
+        ).ask()
+        if not new_dest:
+            return
+    elif field == "SNI (serverNames)":
+        new_sni_str = questionary.text(
+            "Новый SNI (через запятую, если несколько):",
+            default=current_sni,
+            style=CUSTOM_STYLE,
+        ).ask()
+        if not new_sni_str:
+            return
+        new_sni = [s.strip() for s in new_sni_str.split(",") if s.strip()]
+
+    # Подтверждение
+    confirm = questionary.confirm(
+        "Применить изменения? Xray будет перезапущен.",
+        default=False,
+        style=CUSTOM_STYLE,
+    ).ask()
+    if not confirm:
+        return
+
+    try:
+        with console.status("[cyan]Обновляю сервер...[/cyan]"):
+            result = edit_server(
+                server_id=sid,
+                new_port=new_port,
+                new_dest=new_dest,
+                new_server_names=new_sni,
+            )
+    except (SSHError, ImportError_, Exception) as e:
+        _error(str(e))
+        return
+
+    table = Table(title=f"Сервер {result['name']} обновлён", show_lines=True)
+    table.add_column("Параметр", style="cyan")
+    table.add_column("Было")
+    table.add_column("Стало")
+
+    if result["old_port"] != result["new_port"]:
+        table.add_row("Порт", str(result["old_port"]), f"[green]{result['new_port']}[/green]")
+    if result["old_dest"] != result["new_dest"]:
+        table.add_row("dest", result["old_dest"], f"[green]{result['new_dest']}[/green]")
+    if result["old_sni"] != result["new_sni"]:
+        table.add_row(
+            "SNI",
+            ", ".join(result["old_sni"]),
+            f"[green]{', '.join(result['new_sni'])}[/green]",
+        )
+
+    console.print(table)
+    console.print("[dim]Xray перезапущен. Подписки обновятся автоматически.[/dim]")
 
 def _servers_add() -> None:
     console.rule("[bold]Добавление нового сервера[/bold]")

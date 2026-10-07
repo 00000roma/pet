@@ -102,3 +102,36 @@ def update_port(config_text: str, new_port: int) -> str:
     inbound = _find_vless_reality_inbound(data)
     inbound["port"] = new_port
     return json.dumps(data, indent=2, ensure_ascii=False)
+
+def update_reality_settings(
+    config_text: str,
+    *,
+    new_port: int | None = None,
+    new_dest: str | None = None,
+    new_server_names: list[str] | None = None,
+) -> str:
+    """
+    Меняет параметры Reality inbound:
+      - port: внешний порт
+      - dest: адрес маскировки
+      - serverNames: список SNI
+
+    None означает "не менять".
+    Возвращает обновлённый JSON.
+    """
+    data = json.loads(config_text)
+    inbound = _find_vless_reality_inbound(data)
+
+    if new_port is not None:
+        inbound["port"] = int(new_port)
+
+    stream = inbound.setdefault("streamSettings", {})
+    reality = stream.setdefault("realitySettings", {})
+
+    if new_dest is not None:
+        reality["dest"] = new_dest
+
+    if new_server_names is not None:
+        reality["serverNames"] = list(new_server_names)
+
+    return json.dumps(data, indent=2, ensure_ascii=False)

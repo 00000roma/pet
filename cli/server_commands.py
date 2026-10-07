@@ -11,6 +11,8 @@ from rich.panel import Panel
 from core.server_manager import (
     import_existing_server,
     deploy_fresh,
+    get_server_status,
+    edit_server,
     ImportError_,
 )
 from core.ssh_client import SSHError
@@ -146,3 +148,108 @@ def list_cmd():
         console.print(table)
     finally:
         session.close()
+
+@app.command("status")
+def status_cmd(
+    server_id: int = typer.Option(..., "--id", help="ID сервера"),
+):
+    """Показать статус сервера."""
+    init_db()
+    try:
+        with console.status(f"[cyan]Проверяю сервер id={server_id}...[/cyan]"):
+            result = get_server_status(server_id)
+    except Exception as e:
+        console.print(Panel(f"[red]{e}", title="Ошибка"))
+        raise typer.Exit(code=1)
+
+    if result.get("error") and not result.get("xray_installed"):
+        console.print(Panel(
+            f"[red]Ошибка:[/red] {result['error']}",
+            title=f"Сервер {result['name']}",
+        ))
+        return
+
+    # Формируем таблицу
+    table = Table(title=f"Статус сервера: {result['name']}", show_lines=True)
+    table.add_column("Параметр", style="cyan")
+    table.add_column("Значение")
+
+    status_color = "green" if result["service_active"] == "active" else "red"
+    table.add_row("Host", f"{result['host']}:{result['port']}")
+    table.add_row(
+        "Xray установлен",
+        "[green]да[/green]" if result["xray_installed"] else "[red]нет[/red]",
+    )
+    table.add_row(
+        "Служба",
+        f"[{status_color}]{result['service_active']}[/{status_color}]",
+    )
+    table.add_row("Версия Xray", result["version"])
+    table.add_row("Uptime", result["uptime"])
+    table.add_row(
+        "Клиентов в конфиге",
+        str(result["clients_count"]),
+    )
+    table.add_row(
+        "Конфиг",
+        "[green]OK[/green]" if result["config_ok"] else "[red]ошибка[/red]",
+    )
+    if result.get("error"):
+        table.add_row("[red]Ошибка[/red]", f"[red]{result['error']}[/red]")
+
+    console.print(table)
+
+@app.command("edit")
+def edit_cmd(
+    server_id: int = typer.Option(..., "--id", help="ID сервера"),
+    port: int = typer.Option(None, "--port", help="Новый порт Xray"),
+    dest: str = typer.Option(None, "--dest", help="Новый dest (например, www.yahoo.com:443)"),
+    sni: str = typer.Option(
+        None, "--sni",
+        help="Новый SNI (serverNames), через запятую если несколько",
+    ),
+):
+    """Изменить параметры сервера (порт, dest, SNI)."""
+    init_db()
+
+    if port is None and dest is None and sni is None:
+        console.print(
+            "[yellow]Ничего не указано. Используй хотя бы один из: "
+            "--port / --dest / --sni[/yellow]"
+        )
+        raise typer.Exit(code=1)
+
+    new_sni = None
+    if sni is not None:
+        new_sni = [s.strip() for s in sni.split(",") if s.strip()]
+
+    try:
+        with console.status(f"[cyan]Изменяю настройки сервера id={server_id}...[/cyan]"):
+            result = edit_server(
+                server_id=server_id,
+                new_port=port,
+                new_dest=dest,
+                new_server_names=new_sni,
+            )
+    except (SSHError, ImportError_) as e:
+        console.print(Panel(f"[red]{e}", title="Ошибка"))
+        raise typer.Exit(code=1)
+
+    table = Table(title=f"Сервер {result['name']} обновлён", show_lines=True)
+    table.add_column("Параметр", style="cyan")
+    table.add_column("Было")
+    table.add_column("Стало")
+
+    if result["old_port"] != result["new_port"]:
+        table.add_row("Порт", str(result["old_port"]), f"[green]{result['new_port']}[/green]")
+    if result["old_dest"] != result["new_dest"]:
+        table.add_row("dest", result["old_dest"], f"[green]{result['new_dest']}[/green]")
+    if result["old_sni"] != result["new_sni"]:
+        table.add_row(
+            "SNI",
+            ", ".join(result["old_sni"]),
+            f"[green]{', '.join(result['new_sni'])}[/green]",
+        )
+
+    console.print(table)
+    console.print("[dim]Xray перезапущен. Подписки обновятся автоматически.[/dim]")

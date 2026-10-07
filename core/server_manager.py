@@ -251,3 +251,188 @@ def deploy_fresh(
         }
     finally:
         session.close()
+
+def get_server_status(server_id: int) -> dict:
+    """
+    Проверяет состояние Xray на сервере:
+    - установлен ли бинарник
+    - активна ли служба
+    - версия
+    - uptime
+    - кол-во клиентов в конфиге
+    """
+    session = get_session()
+    try:
+        server = session.query(Server).filter_by(id=server_id).one_or_none()
+        if not server:
+            raise ImportError_(f"Сервер с id={server_id} не найден.")
+    finally:
+        session.close()
+
+    ssh = XrayServer(
+        host=server.host,
+        ssh_port=server.ssh_port,
+        ssh_user=server.ssh_user,
+        key_path=server.ssh_key_path,
+    )
+
+    result = {
+        "server_id": server.id,
+        "name": server.name,
+        "host": server.host,
+        "port": server.xray_port,
+        "xray_installed": False,
+        "service_active": "unknown",
+        "version": "unknown",
+        "uptime": "unknown",
+        "clients_count": 0,
+        "config_ok": False,
+        "error": None,
+    }
+
+    try:
+        with ssh.session():
+            # 1. Установлен ли Xray
+            result["xray_installed"] = ssh.xray_installed()
+            if not result["xray_installed"]:
+                result["error"] = "Xray не установлен"
+                return result
+
+            # 2. Статус службы
+            result["service_active"] = ssh.xray_service_status_sudo()
+
+            # 3. Версия Xray
+            ver = ssh.run("/usr/local/bin/xray version", warn=True)
+            if ver.ok:
+                # Xray version: 25.3.6 (...)
+                first_line = (ver.stdout or "").splitlines()[0] if ver.stdout else ""
+                # Извлекаем версию через split
+                parts = first_line.split()
+                if len(parts) >= 2:
+                    result["version"] = parts[-2] if parts[-2][0].isdigit() else parts[-1]
+                else:
+                    result["version"] = first_line
+
+            # 4. Uptime сервиса
+            uptime = ssh.run(
+                "systemctl show xray --property=ActiveEnterTimestamp --value",
+                warn=True,
+            )
+            if uptime.ok and uptime.stdout.strip():
+                result["uptime"] = uptime.stdout.strip()
+
+            # 5. Кол-во клиентов в config.json
+            try:
+                config_text = ssh.read_config_auto()
+                inbound = parse_config(config_text)
+                result["clients_count"] = len(inbound.clients)
+                result["config_ok"] = True
+            except Exception as e:
+                result["error"] = f"Ошибка чтения конфига: {e}"
+
+        return result
+    except Exception as e:
+        result["error"] = str(e)
+        return result
+
+def edit_server(
+    *,
+    server_id: int,
+    new_port: int | None = None,
+    new_dest: str | None = None,
+    new_server_names: list[str] | None = None,
+) -> dict:
+    """
+    Меняет параметры существующего сервера:
+      - порт Xray
+      - dest (маскировочный сайт)
+      - serverNames (SNI)
+
+    Обновляет config.json на сервере и БД.
+    Перезапускает Xray.
+    """
+    from core.config_parser import update_reality_settings
+
+    session = get_session()
+    try:
+        server = session.query(Server).filter_by(id=server_id).one_or_none()
+        if not server:
+            raise ImportError_(f"Сервер с id={server_id} не найден.")
+
+        old_port = server.xray_port
+        old_dest = server.reality_dest
+        old_sni = list(json.loads(server.reality_server_names or "[]"))
+
+        ssh = XrayServer(
+            host=server.host,
+            ssh_port=server.ssh_port,
+            ssh_user=server.ssh_user,
+            key_path=server.ssh_key_path,
+        )
+
+        with ssh.session():
+            # 1. Читаем текущий конфиг
+            config_text = ssh.read_config_auto()
+
+            # 2. Модифицируем
+            updated = update_reality_settings(
+                config_text,
+                new_port=new_port,
+                new_dest=new_dest,
+                new_server_names=new_server_names,
+            )
+
+            # 3. Валидируем (записываем во временный файл и проверяем)
+            ssh.run(
+                "sudo tee /tmp/xray_test.json > /dev/null << 'EOF'\n"
+                f"{updated}\nEOF",
+                warn=True,
+            )
+            check = ssh.run(
+                "sudo /usr/local/bin/xray run -test -c /tmp/xray_test.json",
+                warn=True,
+            )
+            if check.failed:
+                raise ImportError_(
+                    f"Конфиг невалидный:\n{check.stderr}"
+                )
+
+            # 4. Записываем основной конфиг (с бэкапом)
+            ssh.write_config_auto(
+                "/usr/local/etc/xray/config.json",
+                updated,
+                backup=True,
+            )
+
+            # 5. Перезапускаем
+            ssh.restart_xray()
+            status = ssh.xray_service_status_sudo()
+            if status != "active":
+                raise ImportError_(
+                    f"Xray не запустился после изменений (status={status}).\n"
+                    f"Проверь: sudo journalctl -u xray -n 50"
+                )
+
+        # 6. Обновляем БД
+        if new_port is not None:
+            server.xray_port = int(new_port)
+        if new_dest is not None:
+            server.reality_dest = new_dest
+        if new_server_names is not None:
+            server.reality_server_names = json.dumps(list(new_server_names))
+
+        session.commit()
+
+        return {
+            "server_id": server.id,
+            "name": server.name,
+            "host": server.host,
+            "old_port": old_port,
+            "new_port": server.xray_port,
+            "old_dest": old_dest,
+            "new_dest": server.reality_dest,
+            "old_sni": old_sni,
+            "new_sni": list(json.loads(server.reality_server_names or "[]")),
+        }
+    finally:
+        session.close()
