@@ -1,0 +1,9 @@
+data/*.db
+data/*.db-journal
+data/logs/
+data/backups/
+.env
+venv/
+__pycache__/
+*.pyc
+.vscode/
