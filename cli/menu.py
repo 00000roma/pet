@@ -356,9 +356,9 @@ def _servers_remove() -> None:
 
     session = get_session()
     try:
-        # Удаляем связи явно (даже если CASCADE не сработает)
+        # Явно удаляем связи (даже с CASCADE — надёжнее)
         session.query(UserServer).filter_by(server_id=sid).delete()
-        # Теперь удаляем сам сервер
+        # Потом сам сервер
         session.delete(server)
         session.commit()
         _success(
@@ -439,6 +439,10 @@ def _users_add() -> None:
         "На какие серверы добавить?",
         choices=[c for c in choices if c.value != "all"],
         style=CUSTOM_STYLE,
+        instruction=(
+            "(↑↓ — навигация, Пробел — выбрать, "
+            "A — выбрать всё, I — инвертировать)"
+        ),
     ).ask()
     if not selected:
         console.print("[yellow]Ничего не выбрано.[/yellow]")
