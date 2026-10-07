@@ -8,7 +8,11 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 
-from core.server_manager import import_existing_server, ImportError_
+from core.server_manager import (
+    import_existing_server,
+    deploy_fresh,
+    ImportError_,
+)
 from core.ssh_client import SSHError
 from db.database import init_db, get_session
 from db.models import Server
@@ -52,6 +56,60 @@ def import_cmd(
         f"Импортировано пользователей: [bold]{summary['users_imported']}[/bold] "
         f"(всего на сервере: {summary['users_total_on_server']})",
         title="Импорт завершён",
+    ))
+
+
+@app.command("add")
+def add_cmd(
+    host: str = typer.Option(..., "--host", "-h", help="IP или домен сервера"),
+    key: str = typer.Option(..., "--key", "-k", help="Путь к SSH-ключу"),
+    ssh_port: int = typer.Option(22, "--ssh-port", help="SSH-порт"),
+    ssh_user: str = typer.Option("root", "--ssh-user", help="SSH-пользователь"),
+    name: str = typer.Option(None, "--name", "-n", help="Имя сервера"),
+    xray_port: int = typer.Option(443, "--xray-port", help="Порт Xray"),
+    dest: str = typer.Option(
+        "www.microsoft.com:443", "--dest",
+        help="Сайт-маскировка (dest) для Reality",
+    ),
+):
+    """Развернуть Xray с нуля на чистом сервере."""
+    init_db()
+
+    console.print(
+        Panel.fit(
+            f"[yellow]ВНИМАНИЕ:[/yellow] Это установит Xray на [bold]{host}[/bold].\n"
+            f"Использовать только на ЧИСТОМ сервере без Xray.",
+            title="Подтверждение",
+        )
+    )
+    if not typer.confirm("Продолжить?", default=False):
+        raise typer.Exit(code=0)
+
+    try:
+        with console.status("[cyan]Разворачиваю Xray (это займёт 1-3 минуты)...[/cyan]"):
+            summary = deploy_fresh(
+                host=host,
+                ssh_key_path=key,
+                ssh_port=ssh_port,
+                ssh_user=ssh_user,
+                name=name,
+                xray_port=xray_port,
+                dest=dest,
+                log_callback=None,
+            )
+    except (SSHError, ImportError_) as e:
+        console.print(Panel(f"[red]{e}", title="Ошибка деплоя"))
+        raise typer.Exit(code=1)
+
+    console.print(Panel.fit(
+        f"[green]Сервер успешно развёрнут[/green]\n"
+        f"ID: [bold]{summary['server_id']}[/bold]\n"
+        f"Имя: {summary['name']}\n"
+        f"Host: {summary['host']}:{summary['port']}\n"
+        f"dest: {summary['dest']}\n"
+        f"Публичный ключ: {summary['public_key'][:30]}...\n"
+        f"Short ID: {summary['short_id']}",
+        title="Deploy завершён",
     ))
 
 

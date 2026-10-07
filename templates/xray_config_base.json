@@ -5,16 +5,10 @@
   "inbounds": [
     {
       "listen": "0.0.0.0",
-      "port": 443,
+      "port": "{{ port }}",
       "protocol": "vless",
       "settings": {
-        "clients": [
-          {
-            "id": "{{ user_uuid }}",
-            "email": "{{ user_email }}",
-            "flow": "xtls-rprx-vision"
-          }
-        ],
+        "clients": [],
         "decryption": "none"
       },
       "streamSettings": {
@@ -22,17 +16,14 @@
         "security": "reality",
         "realitySettings": {
           "show": false,
-          "dest": "www.microsoft.com:443",
+          "dest": "{{ dest }}",
           "xver": 0,
-          "serverNames": [
-            "www.microsoft.com"
-          ],
+          "serverNames": {{ server_names | tojson }},
           "privateKey": "{{ private_key }}",
-          "shortIds": [
-            "{{ short_id }}"
-          ]
+          "shortIds": {{ short_ids | tojson }}
         }
       },
+      
       "sniffing": {
         "enabled": true,
         "destOverride": ["http", "tls", "quic"]
@@ -40,22 +31,12 @@
     }
   ],
   "outbounds": [
-    {
-      "protocol": "freedom",
-      "tag": "direct"
-    },
-    {
-      "protocol": "blackhole",
-      "tag": "block"
-    }
+    {"protocol": "freedom", "tag": "direct"},
+    {"protocol": "blackhole", "tag": "block"}
   ],
   "routing": {
     "rules": [
-      {
-        "type": "field",
-        "ip": ["geoip:private"],
-        "outboundTag": "block"
-      }
+      {"type": "field", "ip": ["geoip:private"], "outboundTag": "block"}
     ]
   }
 }
