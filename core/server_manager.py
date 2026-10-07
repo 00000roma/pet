@@ -117,10 +117,17 @@ def import_existing_server(
                 session.flush()
                 users_added += 1
 
+            # Проверяем, нет ли уже связи
+            existing_link = (
+                session.query(UserServer)
+                .filter_by(user_id=user.id, server_id=server.id)
+                .one_or_none()
+            )
+            if existing_link:
+                continue
+
             link = UserServer(user_id=user.id, server_id=server.id, flow=flow)
             session.add(link)
-
-        session.commit()
 
         return {
             "server_id": server.id,
