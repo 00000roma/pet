@@ -7,3 +7,6 @@ venv/
 __pycache__/
 *.pyc
 .vscode/
+*.tar
+*.tar.gz
+xray-manager.tar
