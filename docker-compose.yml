@@ -1,0 +1,26 @@
+# docker-compose.yml
+services:
+  xray-manager:
+    build: .
+    image: xray-manager:latest
+    container_name: xray-manager
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-8080}:8080"
+    volumes:
+      # Данные (БД, логи, бэкапы) — на хосте
+      - ./data:/app/data
+      # Шаблоны (можно менять без пересборки)
+      - ./templates:/app/templates:ro
+      # SSH-ключи для управления серверами (только чтение)
+      - ${SSH_DIR:-~/.ssh}:/root/.ssh:ro
+    environment:
+      DB_PATH: data/xray_manager.db
+      LOG_LEVEL: INFO
+      PYTHONUNBUFFERED: "1"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
