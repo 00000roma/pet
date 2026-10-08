@@ -7,7 +7,3 @@ venv/
 __pycache__/
 *.pyc
 .vscode/
-# Docker image exports (никогда не коммитить!)
-*.tar
-*.tar.gz
-xray-manager.tar
