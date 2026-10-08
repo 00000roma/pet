@@ -34,19 +34,21 @@ def _build_vless_link(
     fingerprint: str = "chrome",
 ) -> str:
     """
-    Собирает клиентскую ссылку vless:// для Reality.
+    Собирает клиентскую ссылку vless:// для Reality + XHTTP.
     Пример:
-    vless://uuid@host:port?type=tcp&security=reality&pbk=...&fp=chrome&sni=...&sid=...&spx=%2F&flow=xtls-rprx-vision#label
+    vless://uuid@host:port?type=xhttp&security=reality&pbk=...&fp=chrome&sni=...&sid=...&spx=%2F&path=%2Fxhttp&mode=auto#label
     """
     params = {
-        "type": "tcp",
+        "type": "xhttp",           # было "tcp"
         "security": "reality",
         "pbk": public_key,
         "fp": fingerprint,
         "sni": sni,
         "sid": short_id,
         "spx": "/",
-        "flow": flow,
+        "path": "/xhttp",          # ← новый параметр для XHTTP
+        "mode": "auto",            # ← и этот
+        # flow НЕ указываем — он несовместим с XHTTP
     }
     query = urlencode(params)
     return f"vless://{uuid}@{host}:{port}?{query}#{label}"

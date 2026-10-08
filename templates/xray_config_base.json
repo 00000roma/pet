@@ -12,7 +12,11 @@
         "decryption": "none"
       },
       "streamSettings": {
-        "network": "tcp",
+        "network": "xhttp",
+        "xhttpSettings": {
+          "mode": "auto",
+          "path": "/xhttp"
+        },
         "security": "reality",
         "realitySettings": {
           "show": false,
@@ -23,7 +27,7 @@
           "shortIds": {{ short_ids | tojson }}
         }
       },
-      
+
       "sniffing": {
         "enabled": true,
         "destOverride": ["http", "tls", "quic"]

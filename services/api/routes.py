@@ -40,7 +40,7 @@ def sub_base64(email: str) -> Response:
             # Заголовок, который ожидают многие клиенты:
             "Profile-Update-Interval": "24",
             # Имя подписки (используется некоторыми клиентами):
-            "Profile-Title": f"Xray Manager ({email})",
+            "Profile-Title": f"Reactive",
         },
     )
 

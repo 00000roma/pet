@@ -129,7 +129,7 @@ def import_existing_server(
             link = UserServer(user_id=user.id, server_id=server.id, flow=flow)
             session.add(link)
 
-        # ← ВОТ ЭТА СТРОКА ПРОПАЛА — БЕЗ НЕЁ НИЧЕГО НЕ СОХРАНЯЕТСЯ
+        
         session.commit()
 
         return {
