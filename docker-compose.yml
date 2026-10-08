@@ -9,8 +9,6 @@ services:
     volumes:
       # Данные (БД, логи, бэкапы) — на хосте
       - ./data:/app/data
-      # Шаблоны (можно менять без пересборки)
-      - ./templates:/app/templates:ro
       # SSH-ключи для управления серверами (только чтение)
       - ${SSH_DIR:-~/.ssh}:/root/.ssh:ro
     environment:
