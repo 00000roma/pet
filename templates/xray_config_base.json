@@ -27,7 +27,6 @@
           "shortIds": {{ short_ids | tojson }}
         }
       },
-
       "sniffing": {
         "enabled": true,
         "destOverride": ["http", "tls", "quic"]

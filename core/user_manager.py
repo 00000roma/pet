@@ -51,7 +51,7 @@ def _sync_user_to_server(
     )
     with ssh.session():
         config_text = ssh.read_config_auto()
-        updated = add_client(config_text, uuid=user_uuid, email=email, flow=flow)
+        updated = add_client(config_text, uuid=user_uuid, email=email, flow="")
         ssh.write_config_auto(
             "/usr/local/etc/xray/config.json",
             updated,
@@ -82,7 +82,7 @@ def _remove_user_from_server(server: Server, email: str) -> None:
 def add_user(
     email: str,
     server_ids: list[int],
-    flow: str = "xtls-rprx-vision",
+    flow: str = "",
 ) -> tuple[str, list[ActionResult]]:
     """
     Создаёт (или берёт существующего) пользователя и добавляет на указанные серверы.

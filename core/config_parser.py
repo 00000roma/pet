@@ -73,8 +73,11 @@ def _find_vless_reality_inbound(data: dict) -> dict:
     raise ConfigError("VLESS + Reality inbound не найден")
 
 
-def add_client(config_text: str, uuid: str, email: str, flow: str = "xtls-rprx-vision") -> str:
-    """Добавляет нового клиента. Если email уже есть — ничего не меняет."""
+def add_client(config_text: str, uuid: str, email: str, flow: str = "") -> str:
+    """
+    Добавляет нового клиента. Если email уже есть — ничего не меняет.
+    flow пустой для XHTTP.
+    """
     data = json.loads(config_text)
     inbound = _find_vless_reality_inbound(data)
     clients = inbound.setdefault("settings", {}).setdefault("clients", [])
@@ -83,7 +86,10 @@ def add_client(config_text: str, uuid: str, email: str, flow: str = "xtls-rprx-v
         if c.get("email") == email:
             return json.dumps(data, indent=2, ensure_ascii=False)
 
-    clients.append({"id": uuid, "email": email, "flow": flow})
+    client = {"id": uuid, "email": email}
+    if flow:
+        client["flow"] = flow
+    clients.append(client)
     return json.dumps(data, indent=2, ensure_ascii=False)
 
 

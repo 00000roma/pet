@@ -29,7 +29,6 @@ def _build_vless_link(
     public_key: str,
     sni: str,
     short_id: str,
-    flow: str,
     label: str,
     fingerprint: str = "chrome",
 ) -> str:
@@ -86,7 +85,6 @@ def get_user_links(email: str) -> list[UserLink]:
                 public_key=server.reality_public_key,
                 sni=server_names[0],
                 short_id=short_ids[0],
-                flow=link_row.flow or "xtls-rprx-vision",
                 label=f"{server.name} | {email}",
             )
             links.append(
