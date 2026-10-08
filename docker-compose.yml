@@ -1,8 +1,7 @@
 # docker-compose.yml
 services:
   xray-manager:
-    build: .
-    image: xray-manager:latest
+    image: ghcr.io/00000roma/xray-manager:latest
     container_name: xray-manager
     restart: unless-stopped
     ports:
