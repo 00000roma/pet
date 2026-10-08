@@ -73,3 +73,32 @@ def show_cmd(
     except SubscriptionError as e:
         console.print(Panel(f"[red]{e}", title="Ошибка"))
         raise typer.Exit(code=1)
+
+@app.command("happ")
+def happ_cmd(
+    email: str = typer.Option(..., "--email", "-e"),
+    preset: str = typer.Option("ru", "--preset"),
+    raw: bool = typer.Option(False, "--raw"),
+):
+    """Показать Happ routing deep link для пользователя."""
+    from core.happ_routing import build_happ_deep_link, ROUTING_PRESETS
+
+    if preset not in ROUTING_PRESETS:
+        console.print(f"[red]Неизвестный preset: {preset}[/red]")
+        raise typer.Exit(code=1)
+
+    deep_link = build_happ_deep_link(preset=preset, custom_name=f"Reactive | {email}")
+
+    if raw:
+        print(deep_link)
+        return
+
+    console.print(Panel.fit(
+        f"[bold]Happ routing для {email}[/bold]\n"
+        f"Пресет: {preset}\n\n"
+        f"[dim]Скопируй строку ниже и вставь в Happ: "
+        f"Импорт из буфера[/dim]",
+        title="Happ Routing",
+        border_style="cyan",
+    ))
+    console.print(deep_link)

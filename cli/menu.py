@@ -726,6 +726,8 @@ def subscriptions_menu() -> None:
                 "Показать Base64-подписку",
                 "Показать сырые vless:// ссылки",
                 "Показать URL подписки",
+                "Показать URL всех форматов",           # ← НОВЫЙ
+                "Показать Happ routing (deep link)",    # ← НОВЫЙ
                 "Назад",
             ],
             style=CUSTOM_STYLE,
@@ -741,6 +743,12 @@ def subscriptions_menu() -> None:
             _pause()
         elif choice == "Показать URL подписки":
             _sub_show_url()
+            _pause()
+        elif choice == "Показать URL всех форматов":
+            _sub_show_all_urls()
+            _pause()
+        elif choice == "Показать Happ routing (deep link)":
+            _sub_show_happ_routing()
             _pause()
 
 
@@ -768,6 +776,84 @@ def _sub_show_base64() -> None:
         return
     console.print(f"\n[bold]{email}[/bold] — Base64:\n")
     console.print(b64)
+
+def _sub_show_all_urls() -> None:
+    """Показать все доступные URL подписок для пользователя."""
+    email = _pick_user()
+    if not email:
+        return
+
+    # Определяем хост — берём из .env или вычисляем
+    import os
+    host = os.getenv("PUBLIC_HOST", "localhost")
+    port = 8080
+    base = f"http://{host}:{port}"
+
+    console.print(Panel.fit(
+        f"[bold]Base64-подписка (универсально):[/bold]\n"
+        f"  {base}/sub/{email}\n\n"
+        f"[bold]Сырой список vless://:[/bold]\n"
+        f"  {base}/sub/{email}/raw\n\n"
+        f"[bold]Xray JSON с правилами (Nekoray/v2rayN):[/bold]\n"
+        f"  {base}/sub/{email}/xray.json\n\n"
+        f"[bold]Happ routing — страница с кнопкой:[/bold]\n"
+        f"  {base}/sub/{email}/happ-routing\n\n"
+        f"[bold]Happ routing — сырой deep link:[/bold]\n"
+        f"  {base}/sub/{email}/happ-routing/raw\n\n"
+        f"[bold]Информация:[/bold]\n"
+        f"  {base}/sub/{email}/info",
+        title=f"URL подписок для {email}",
+        border_style="cyan",
+    ))
+
+
+def _sub_show_happ_routing() -> None:
+    """Сгенерировать и показать Happ routing deep link."""
+    from core.happ_routing import build_happ_deep_link, ROUTING_PRESETS
+
+    email = _pick_user()
+    if not email:
+        return
+
+    preset = questionary.select(
+        "Какой пресет использовать?",
+        choices=[
+            questionary.Choice(
+                "Россия (реклама → block, РФ → direct)",
+                value="ru",
+            ),
+            questionary.Choice(
+                "Только AdBlock",
+                value="adblock",
+            ),
+            questionary.Choice(
+                "Глобально (всё через прокси)",
+                value="global",
+            ),
+        ],
+        style=CUSTOM_STYLE,
+    ).ask()
+    if not preset:
+        return
+
+    deep_link = build_happ_deep_link(
+        preset=preset,
+        custom_name=f"Reactive | {email}",
+    )
+
+    console.print(Panel.fit(
+        f"[bold]Deep link для {email}[/bold]\n"
+        f"Пресет: {preset}\n\n"
+        f"[dim]1. Скопируй ссылку ниже[/dim]\n"
+        f"[dim]2. Открой Happ → Routing → Импорт из буфера[/dim]\n"
+        f"[dim]3. Сохрани[/dim]",
+        title="Happ Routing",
+        border_style="cyan",
+    ))
+    console.print(deep_link)
+
+
+
 
 
 def _sub_show_raw() -> None:
