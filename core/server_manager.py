@@ -176,15 +176,53 @@ def deploy_fresh(
 
     with ssh.session():
         state = ssh.detect_state()
-        if state != "empty":
-            raise ImportError_(
-                f"Сервер {host} не пустой (state={state}). "
-                f"Используй 'server import' для существующего."
-            )
 
-        # 1. Установка Xray
-        log("[1/4] Устанавливаю Xray...")
-        install_xray(ssh, log_callback=log)
+        if state == "empty":
+            # 1. Установка Xray (полный цикл)
+            log("[1/4] Устанавливаю Xray...")
+            install_xray(ssh, log_callback=log)
+        elif state == "installed_no_config":
+            # Xray уже есть, но конфига нет — пропускаем установку
+            log("[1/4] Xray уже установлен, пропускаю установку.")
+        elif state == "installed_with_config":
+            # Уже полностью настроен — предупреждаем, но не падаем
+            log("[WARN] Xray уже настроен. Конфиг будет перезаписан.")
+        else:
+            raise ImportError_(f"Неизвестное состояние сервера: {state}")
+
+        # 2. Генерация ключей
+        log("[2/4] Генерирую Reality-ключи...")
+        private_key, public_key = generate_keypair(ssh)
+        short_id = generate_short_id()
+        log(f"    Public key: {public_key[:20]}...")
+        log(f"    Short ID:   {short_id}")
+
+        # 3. Рендер и заливка config.json
+        log("[3/4] Генерирую и заливаю config.json...")
+        server_names = [dest.split(":")[0]]
+        config_text = _render_config(
+            port=xray_port,
+            dest=dest,
+            server_names=server_names,
+            private_key=private_key,
+            short_ids=[short_id],
+        )
+        ssh.run("sudo mkdir -p /usr/local/etc/xray")
+        ssh.write_config_auto(
+            "/usr/local/etc/xray/config.json", config_text, backup=False
+        )
+
+        # 4. Запуск Xray
+        log("[4/4] Запускаю службу Xray...")
+        ssh.run("sudo systemctl enable xray", warn=True)
+        ssh.restart_xray()
+
+        status = ssh.xray_service_status_sudo()
+        if status != "active":
+            raise ImportError_(
+                f"Xray не запустился. Статус: {status}. "
+                f"Проверь 'sudo journalctl -u xray -n 50' на сервере."
+            )
 
         # 2. Генерация ключей
         log("[2/4] Генерирую Reality-ключи...")
