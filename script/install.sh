@@ -20,10 +20,11 @@ error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
 # ---------- Настройки ----------
 GITHUB_USER="${GITHUB_USER:-00000roma}"
+REPO_NAME="${REPO_NAME:-pet}"
 IMAGE="ghcr.io/${GITHUB_USER}/xray-manager:latest"
 INSTALL_DIR="${INSTALL_DIR:-/opt/xray-manager}"
-COMPOSE_URL="https://raw.githubusercontent.com/${GITHUB_USER}/xray-manager/main/docker-compose.yml"
-ENV_EXAMPLE_URL="https://raw.githubusercontent.com/${GITHUB_USER}/xray-manager/main/.env.example"
+COMPOSE_URL="https://raw.githubusercontent.com/${GITHUB_USER}/${REPO_NAME}/refs/heads/main/docker-compose.yml"
+ENV_EXAMPLE_URL="https://raw.githubusercontent.com/${GITHUB_USER}/${REPO_NAME}/refs/heads/main/.env.example"
 
 # ---------- Проверки ----------
 if [ "$EUID" -ne 0 ]; then
