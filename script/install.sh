@@ -58,6 +58,13 @@ fi
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
+# Создаём data/ и копируем шаблон routing_custom, если его нет
+mkdir -p data
+if [ ! -f data/routing_custom.json ] && [ -f routing_custom.example.json ]; then
+    cp routing_custom.example.json data/routing_custom.json
+    ok "Создан data/routing_custom.json из шаблона."
+fi
+
 # ---------- docker-compose.yml ----------
 if [ ! -f docker-compose.yml ]; then
     info "Скачиваю docker-compose.yml..."

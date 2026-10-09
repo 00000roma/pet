@@ -15,6 +15,7 @@ services:
       DB_PATH: data/xray_manager.db
       LOG_LEVEL: INFO
       PYTHONUNBUFFERED: "1"
+      CUSTOM_ROUTING_PATH: data/routing_custom.json
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 30s

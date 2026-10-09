@@ -10,3 +10,4 @@ __pycache__/
 *.tar
 *.tar.gz
 xray-manager.tar
+data/routing_custom.json
