@@ -76,7 +76,7 @@ def sub_happ_routing_page(token: str, request: Request) -> Response:
     """HTML-страница с кнопкой «Открыть в Happ» для routing."""
     user = _get_user_by_token(token)
     base = _get_base_url(request)
-    deep_link = build_happ_deep_link(preset="ru", custom_name=f"Reactive | {user.email}")
+    deep_link = build_happ_deep_link(preset="ru", custom_name="Reactive")
 
     html = f"""<!DOCTYPE html>
 <html lang="ru">
@@ -119,13 +119,13 @@ def sub_happ_routing_page(token: str, request: Request) -> Response:
 def sub_happ_routing_raw(token: str) -> Response:
     """Сырой deep link для Happ routing."""
     user = _get_user_by_token(token)
-    deep_link = build_happ_deep_link(preset="ru", custom_name=f"Reactive | {user.email}")
+    deep_link = build_happ_deep_link(preset="ru", custom_name="Reactive")
     return Response(content=deep_link, media_type="text/plain; charset=utf-8")
 
 
 @router.get("/sub/{token}", response_class=PlainTextResponse)
 def sub_base64(token: str) -> Response:
-    """Base64-подписка для Happ (vless:// с флагами)."""
+    """Base64-подписка для Happ (vless:// с флагами и авто-routing)."""
     user = _get_user_by_token(token)
     try:
         links = get_user_links(user.email)
@@ -135,12 +135,16 @@ def sub_base64(token: str) -> Response:
     raw = "\n".join(l.link for l in links)
     encoded = base64.b64encode(raw.encode("utf-8")).decode("ascii")
 
+    # Заголовок routing: для автоматического применения правил в Happ
+    routing_link = build_happ_deep_link(preset="ru", custom_name="Reactive")
+
     return Response(
         content=encoded,
         media_type="text/plain; charset=utf-8",
         headers={
             "Profile-Update-Interval": "24",
             "Profile-Title": "Reactive",
+            "routing": routing_link,           # ← НОВОЕ
         },
     )
 
@@ -151,7 +155,7 @@ def go_page(token: str, request: Request) -> Response:
     user = _get_user_by_token(token)
     base = _get_base_url(request)
 
-    sub_url = f"{base}/sub/{token}/xray.json"
+    sub_url = f"{base}/sub/{token}"
     happ_link = f"happ://add/{sub_url}"
 
     html = f"""<!DOCTYPE html>

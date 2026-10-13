@@ -24,7 +24,7 @@ GEOSITE_URL = "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/
 
 ROUTING_PRESETS = {
     "ru": {
-        "name": "Reactive (RU)",
+        "name": "Reactive",
         "direct_sites": [
             "geosite:private",
             "geosite:category-gov-ru",
