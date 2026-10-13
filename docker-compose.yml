@@ -12,6 +12,7 @@ services:
       # SSH-ключи для управления серверами (только чтение)
       - ${SSH_DIR:-~/.ssh}:/root/.ssh:ro
     environment:
+      PUBLIC_URL: ${PUBLIC_URL}
       DB_PATH: data/xray_manager.db
       LOG_LEVEL: INFO
       PYTHONUNBUFFERED: "1"

@@ -1,6 +1,6 @@
 # core/server_manager.py
 from __future__ import annotations
-
+import secrets
 import json
 from pathlib import Path
 
@@ -89,6 +89,7 @@ def import_existing_server(
         server = Server(
             name=name,
             host=host,
+            managed=False,
             ssh_port=ssh_port,
             ssh_user=ssh_user,
             ssh_key_path=ssh_key_path,
@@ -104,20 +105,23 @@ def import_existing_server(
 
         users_added = 0
         for client in inbound.clients:
-            uuid = client.get("id")
+            client_uuid = client.get("id")
             email = client.get("email")
-            flow = client.get("flow", "xtls-rprx-vision")
-            if not uuid or not email:
+            flow = client.get("flow", "")
+            if not client_uuid or not email:
                 continue
 
             user = session.query(User).filter_by(email=email).one_or_none()
             if not user:
-                user = User(uuid=uuid, email=email)
+                user = User(
+                    uuid=client_uuid,
+                    email=email,
+                    token=secrets.token_urlsafe(24),    # ← НОВОЕ
+                )
                 session.add(user)
                 session.flush()
                 users_added += 1
 
-            # Проверяем, нет ли уже связи
             existing_link = (
                 session.query(UserServer)
                 .filter_by(user_id=user.id, server_id=server.id)
@@ -126,7 +130,12 @@ def import_existing_server(
             if existing_link:
                 continue
 
-            link = UserServer(user_id=user.id, server_id=server.id, flow=flow)
+            link = UserServer(
+                user_id=user.id,
+                server_id=server.id,
+                uuid=client_uuid,           # ← ГЛАВНОЕ: передаём uuid!
+                flow=flow,
+            )
             session.add(link)
 
         
@@ -264,6 +273,7 @@ def deploy_fresh(
         server = Server(
             name=name,
             host=host,
+            managed=True,
             ssh_port=ssh_port,
             ssh_user=ssh_user,
             ssh_key_path=ssh_key_path,

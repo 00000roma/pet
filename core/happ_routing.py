@@ -16,9 +16,17 @@ ROUTING_PRESETS = {
         "direct_sites": [
             "geosite:private",
             "geosite:category-gov-ru",
+            "geosite:category-ru",
             "geosite:cn",
+            "domain:rktv.ru",
         ],
         "direct_ips": [
+            "10.0.0.0/8",
+            "172.16.0.0/12",
+            "192.168.0.0/16",
+            "169.254.0.0/16",
+            "224.0.0.0/4",
+            "255.255.255.255",
             "geoip:private",
             "geoip:ru",
             "geoip:cn",
@@ -27,6 +35,8 @@ ROUTING_PRESETS = {
             "geosite:category-ads-all",
         ],
         "block_ips": [],
+        "proxy_sites": [],
+        "proxy_ips": [],
         "global_proxy": "false",
     },
     "adblock": {
@@ -35,6 +45,8 @@ ROUTING_PRESETS = {
         "direct_ips": ["geoip:private"],
         "block_sites": ["geosite:category-ads-all"],
         "block_ips": [],
+        "proxy_sites": [],
+        "proxy_ips": [],
         "global_proxy": "false",
     },
     "global": {
@@ -43,24 +55,43 @@ ROUTING_PRESETS = {
         "direct_ips": ["geoip:private"],
         "block_sites": ["geosite:category-ads-all"],
         "block_ips": [],
+        "proxy_sites": [],
+        "proxy_ips": [],
         "global_proxy": "true",
     },
 }
 
 
 def build_happ_routing(preset: str = "ru", custom_name: str | None = None) -> dict:
+    """
+    Строит routing для Happ, объединяя:
+    - базовые правила пресета
+    - кастомные правила из data/routing_custom.json
+    """
+    from core.xray_config_builder import _load_custom_routing
+
     if preset not in ROUTING_PRESETS:
         raise ValueError(f"Неизвестный пресет: {preset}")
 
     base = ROUTING_PRESETS[preset]
+    custom = _load_custom_routing()
+
+    # Объединяем базовые + кастомные правила (без дубликатов)
+    def merge(a, b):
+        return list(dict.fromkeys(a + b))
+
+    direct_sites = merge(base["direct_sites"], custom.get("direct_domains", []))
+    direct_ips = merge(base["direct_ips"], custom.get("direct_ips", []))
+    block_sites = merge(base["block_sites"], custom.get("block_domains", []))
+    block_ips = merge(base["block_ips"], custom.get("block_ips", []))
 
     return {
-        "BlockIp": base["block_ips"],
-        "BlockSites": base["block_sites"],
-        "DirectIp": base["direct_ips"],
-        "DirectSites": base["direct_sites"],
-        "ProxyIp": [],
-        "ProxySites": [],
+        "BlockIp": block_ips,
+        "BlockSites": block_sites,
+        "DirectIp": direct_ips,
+        "DirectSites": direct_sites,
+        "ProxyIp": custom.get("proxy_ips", []),
+        "ProxySites": custom.get("proxy_domains", []),
         "DnsHosts": {
             "cloudflare-dns.com": "1.1.1.1",
             "dns.google": "8.8.8.8",
@@ -70,14 +101,8 @@ def build_happ_routing(preset: str = "ru", custom_name: str | None = None) -> di
         "DomesticDNSIP": "8.8.8.8",
         "DomesticDNSType": "DoH",
         "FakeDNS": "false",
-        "Geoipurl": (
-            "https://github.com/Loyalsoldier/v2ray-rules-dat/"
-            "releases/latest/download/geoip.dat"
-        ),
-        "Geositeurl": (
-            "https://github.com/Loyalsoldier/v2ray-rules-dat/"
-            "releases/latest/download/geosite.dat"
-        ),
+        "Geoipurl": "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat",
+        "Geositeurl": "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat",
         "GlobalProxy": base["global_proxy"],
         "Name": custom_name or base["name"],
         "RemoteDNSDomain": "https://cloudflare-dns.com/dns-query",
@@ -85,7 +110,6 @@ def build_happ_routing(preset: str = "ru", custom_name: str | None = None) -> di
         "RemoteDNSType": "DoH",
         "RouteOrder": "block-direct-proxy",
     }
-
 
 def build_happ_deep_link(preset: str = "ru", custom_name: str | None = None) -> str:
     routing = build_happ_routing(preset=preset, custom_name=custom_name)

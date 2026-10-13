@@ -154,6 +154,7 @@ def servers_menu() -> None:
                 "Проверить статус сервера",
                 "Редактировать сервер",
                 "Удалить сервер из БД",
+                "Переключить управление сервером",
                 "Назад",
             ],
             style=CUSTOM_STYLE,
@@ -175,6 +176,9 @@ def servers_menu() -> None:
             _pause()
         elif choice == "Редактировать сервер":       # ← НОВАЯ ОБРАБОТКА
             _servers_edit()
+            _pause()
+        elif choice == "Переключить управление сервером":
+            _servers_toggle_managed()
             _pause()
         elif choice == "Удалить сервер из БД":
             _servers_remove()
@@ -950,3 +954,65 @@ def run_menu() -> None:
             console.print(f"[yellow]Не удалось запустить HTTP-сервер: {e}[/yellow]")
 
     main_menu()
+
+def _servers_toggle_managed() -> None:
+    choices = _server_choices()
+    if not choices:
+        console.print("[yellow]Серверов нет.[/yellow]")
+        return
+    sid = questionary.select(
+        "Какой сервер переключить?",
+        choices=choices,
+        style=CUSTOM_STYLE,
+    ).ask()
+    if sid is None:
+        return
+
+    session = get_session()
+    try:
+        server = session.query(Server).filter_by(id=sid).one_or_none()
+        if not server:
+            _error(f"Сервер ID={sid} не найден.")
+            return
+
+        current = "управляемый (managed)" if server.managed else "не управляемый (read-only)"
+        console.print(f"\nСервер: [bold]{server.name}[/bold]")
+        console.print(f"Текущий режим: [cyan]{current}[/cyan]\n")
+
+        new_state = "не управляемый (read-only)" if server.managed else "управляемый (managed)"
+        confirm = questionary.confirm(
+            f"Переключить в режим: '{new_state}'?",
+            default=False,
+            style=CUSTOM_STYLE,
+        ).ask()
+
+        if not confirm:
+            return
+
+        if not server.managed:
+            # Переключаем в managed — предупреждаем об ОПАСНОСТИ
+            console.print(Panel(
+                "[red bold]⚠️  ВНИМАНИЕ![/red bold]\n\n"
+                "В режиме 'managed' xray-manager будет ИЗМЕНЯТЬ конфиг сервера.\n"
+                "При добавлении/удалении пользователей через наш интерфейс\n"
+                "[yellow]существующие пользователи в конфиге могут быть затронуты[/yellow].\n\n"
+                "Убедись, что:\n"
+                "1. Ты сделал бэкап /usr/local/etc/xray/config.json\n"
+                "2. Все текущие пользователи импортированы в xray-manager\n"
+                "3. Ты готов, что xray-manager будет управлять конфигом",
+                title="Опасно",
+                border_style="red",
+            ))
+            confirm2 = questionary.confirm(
+                "Точно продолжить?",
+                default=False,
+                style=CUSTOM_STYLE,
+            ).ask()
+            if not confirm2:
+                return
+
+        server.managed = not server.managed
+        session.commit()
+        _success(f"Сервер '{server.name}' теперь: {new_state}")
+    finally:
+        session.close()

@@ -54,7 +54,7 @@ def _fetch_user_servers(email: str) -> tuple[str, list[_UserServerInfo]]:
             raise ConfigBuildError(f"У пользователя '{email}' нет серверов.")
 
         result: list[_UserServerInfo] = []
-        for _, server in rows:
+        for link_row, server in rows:
             server_names = json.loads(server.reality_server_names or "[]")
             short_ids = json.loads(server.reality_short_ids or "[]")
             if not server_names or not short_ids:
@@ -65,7 +65,7 @@ def _fetch_user_servers(email: str) -> tuple[str, list[_UserServerInfo]]:
                     server_name=server.name,
                     host=server.host,
                     port=server.xray_port,
-                    uuid=user.uuid,
+                    uuid=link_row.uuid,
                     email=user.email,
                     public_key=server.reality_public_key,
                     sni=server_names[0],
@@ -242,70 +242,83 @@ class ConfigBuildError(Exception):
 
 def _build_routing_rules(default_proxy_tag: str = "proxy") -> list[dict]:
     """
-    Собирает список правил маршрутизации:
-    1. Кастомные правила из файла (блок → direct → proxy)
-    2. Стандартные: реклама, локальные, РФ, CN
-    3. Финал: всё остальное → proxy
+    Собирает список правил маршрутизации.
+    
+    ВАЖНО: Xray применяет логическое И, если в правиле указаны и domain, и ip.
+    Поэтому ВСЕГДА разделяем их на отдельные правила.
     """
     custom = _load_custom_routing()
     rules: list[dict] = []
 
-    # 1. Кастомные блокировки
-    if custom["block_domains"] or custom["block_ips"]:
-        rule = {"type": "field", "outboundTag": "block"}
-        if custom["block_domains"]:
-            rule["domain"] = custom["block_domains"]
-        if custom["block_ips"]:
-            rule["ip"] = custom["block_ips"]
-        rules.append(rule)
-
-    # 2. Кастомные direct
-    if custom["direct_domains"] or custom["direct_ips"]:
-        rule = {"type": "field", "outboundTag": "direct"}
-        if custom["direct_domains"]:
-            rule["domain"] = custom["direct_domains"]
-        if custom["direct_ips"]:
-            rule["ip"] = custom["direct_ips"]
-        rules.append(rule)
-
-    # 3. Кастомные принудительные proxy
-    if custom["proxy_domains"] or custom["proxy_ips"]:
-        rule = {"type": "field", "outboundTag": default_proxy_tag}
-        if custom["proxy_domains"]:
-            rule["domain"] = custom["proxy_domains"]
-        if custom["proxy_ips"]:
-            rule["ip"] = custom["proxy_ips"]
-        rules.append(rule)
-
-    # 4. Стандартные правила
-    rules.extend([
-        {
+    # 1. Кастомные блокировки — раздельно
+    if custom["block_domains"]:
+        rules.append({
             "type": "field",
-            "domain": ["geosite:category-ads-all"],
             "outboundTag": "block",
-        },
-        {
+            "domain": custom["block_domains"],
+        })
+    if custom["block_ips"]:
+        rules.append({
             "type": "field",
-            "ip": ["geoip:private"],
-            "outboundTag": "direct",
-        },
-        {
-            "type": "field",
-            "domain": [
-                "geosite:category-gov-ru",
-                "geosite:cn",
-                "geosite:private",
-            ],
-            "outboundTag": "direct",
-        },
-        {
-            "type": "field",
-            "ip": ["geoip:ru", "geoip:cn"],
-            "outboundTag": "direct",
-        },
-    ])
+            "outboundTag": "block",
+            "ip": custom["block_ips"],
+        })
 
-    # 5. Финал: всё остальное через прокси
+    # 2. Кастомные direct — раздельно
+    if custom["direct_domains"]:
+        rules.append({
+            "type": "field",
+            "outboundTag": "direct",
+            "domain": custom["direct_domains"],
+        })
+    if custom["direct_ips"]:
+        rules.append({
+            "type": "field",
+            "outboundTag": "direct",
+            "ip": custom["direct_ips"],
+        })
+
+    # 3. Кастомные принудительные proxy — раздельно
+    if custom["proxy_domains"]:
+        rules.append({
+            "type": "field",
+            "outboundTag": default_proxy_tag,
+            "domain": custom["proxy_domains"],
+        })
+    if custom["proxy_ips"]:
+        rules.append({
+            "type": "field",
+            "outboundTag": default_proxy_tag,
+            "ip": custom["proxy_ips"],
+        })
+
+    # 4. Стандартные правила — УЖЕ раздельно
+    rules.append({
+        "type": "field",
+        "outboundTag": "block",
+        "domain": ["geosite:category-ads-all"],
+    })
+    rules.append({
+        "type": "field",
+        "outboundTag": "direct",
+        "ip": ["geoip:private"],
+    })
+    rules.append({
+        "type": "field",
+        "outboundTag": "direct",
+        "domain": [
+            "geosite:category-gov-ru",
+            "geosite:cn",
+            "geosite:private",
+        ],
+    })
+    rules.append({
+        "type": "field",
+        "outboundTag": "direct",
+        "ip": ["geoip:ru", "geoip:cn"],
+    })
+
+    # 5. Финал
     rules.append({
         "type": "field",
         "network": "tcp,udp",

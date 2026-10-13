@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from sqlalchemy import (
-    Integer, String, Text, DateTime, ForeignKey, UniqueConstraint
+    Integer, String, Text, DateTime, ForeignKey, UniqueConstraint, Boolean
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -29,6 +29,8 @@ class Server(Base):
     reality_public_key: Mapped[str] = mapped_column(Text, default="")
     reality_short_ids: Mapped[str] = mapped_column(Text, default="[]")
 
+    managed: Mapped[bool] = mapped_column(Boolean, default=True)
+
     status: Mapped[str] = mapped_column(String(32), default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -37,8 +39,9 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    uuid: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     email: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    uuid: Mapped[str] = mapped_column(String(64), nullable=False)
+    token: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -50,3 +53,4 @@ class UserServer(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     server_id: Mapped[int] = mapped_column(ForeignKey("servers.id", ondelete="CASCADE"))
     flow: Mapped[str] = mapped_column(String(32), default="xtls-rprx-vision")
+    uuid: Mapped[str] = mapped_column(String(64), nullable=False)

@@ -79,7 +79,7 @@ def get_user_links(email: str) -> list[UserLink]:
                 continue  # неполные данные — пропускаем
 
             link = _build_vless_link(
-                uuid=user.uuid,
+                uuid=link_row.uuid,
                 host=server.host,
                 port=server.xray_port,
                 public_key=server.reality_public_key,

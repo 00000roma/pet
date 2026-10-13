@@ -1,6 +1,6 @@
 # core/user_manager.py
 from __future__ import annotations
-
+import secrets
 import uuid
 from dataclasses import dataclass
 
@@ -33,35 +33,35 @@ def _get_server(server_id: int) -> Server:
         session.close()
 
 
-def _sync_user_to_server(
-    server: Server,
-    user_uuid: str,
-    email: str,
-    flow: str = "xtls-rprx-vision",
-) -> None:
-    """
-    Добавляет пользователя в config.json сервера и перезапускает Xray.
-    Использует sudo, если SSH-юзер не root.
-    """
+def _sync_user_to_server(server, user_uuid, email, flow=""):
+    if not server.managed:
+        raise UserManagerError(
+            f"Сервер '{server.name}' импортирован (не управляется). "
+            f"Изменения конфига запрещены. "
+            f"Если нужно управлять — переключи в режим 'managed' в меню серверов."
+        )
     ssh = XrayServer(
         host=server.host,
         ssh_port=server.ssh_port,
         ssh_user=server.ssh_user,
-        key_path=server.ssh_key_path,
+        key_path=server.ssh_key_path,        # ← ТУТ ЧТО?
     )
+
     with ssh.session():
         config_text = ssh.read_config_auto()
-        updated = add_client(config_text, uuid=user_uuid, email=email, flow="")
-        ssh.write_config_auto(
-            "/usr/local/etc/xray/config.json",
-            updated,
-            backup=True,
-        )
+        updated = add_client(config_text, uuid=user_uuid, email=email, flow=flow)
+        ssh.write_config_auto("/usr/local/etc/xray/config.json", updated, backup=True)
         ssh.restart_xray()
 
 
 def _remove_user_from_server(server: Server, email: str) -> None:
     """Удаляет пользователя из config.json и перезапускает Xray."""
+    if not server.managed:
+        raise UserManagerError(
+            f"Сервер '{server.name}' импортирован (не управляется). "
+            f"Изменения конфига запрещены. "
+            f"Если нужно управлять — переключи в режим 'managed' в меню серверов."
+        )
     ssh = XrayServer(
         host=server.host,
         ssh_port=server.ssh_port,
@@ -95,7 +95,11 @@ def add_user(
     try:
         user = session.query(User).filter_by(email=email).one_or_none()
         if not user:
-            user = User(uuid=str(uuid.uuid4()), email=email)
+            user = User(
+                uuid=str(uuid.uuid4()),
+                email=email,
+                token=secrets.token_urlsafe(24),    # ← НОВОЕ
+            )
             session.add(user)
             session.flush()
             session.commit()
@@ -111,15 +115,18 @@ def add_user(
             results.append(ActionResult("?", "?", "error", str(e)))
             continue
 
+        # Генерируем UUID ДЛЯ ЭТОГО СЕРВЕРА ДО вызова sync
+        server_uuid = str(uuid.uuid4())
+
         try:
             _sync_user_to_server(
                 server=server,
-                user_uuid=user.uuid,
+                user_uuid=server_uuid,          # ← UUID для этого сервера
                 email=user.email,
                 flow=flow,
             )
-
-            # Сохраняем связь в БД
+            
+            # сохраняем связь в БД
             session = get_session()
             try:
                 exists = (
@@ -132,6 +139,7 @@ def add_user(
                         UserServer(
                             user_id=user.id,
                             server_id=server.id,
+                            uuid=server_uuid,       # ← тот же UUID
                             flow=flow,
                         )
                     )
