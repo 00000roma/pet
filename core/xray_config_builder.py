@@ -7,15 +7,20 @@ routing (блокировка рекламы, direct для РФ, остальн
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
+from pathlib import Path
 
+from core.flags import get_flag_for_server
 from db.database import get_session
 from db.models import Server, User, UserServer
 
-import os
-from pathlib import Path
+
+class ConfigBuildError(Exception):
+    pass
 
 
+# ---------- Данные ----------
 
 @dataclass
 class _UserServerInfo:
@@ -35,6 +40,8 @@ class _UserServerInfo:
     network: str = "xhttp"
     security: str = "reality"
 
+
+# ---------- Загрузка пользователей и серверов ----------
 
 def _fetch_user_servers(email: str) -> tuple[str, list[_UserServerInfo]]:
     session = get_session()
@@ -81,6 +88,8 @@ def _fetch_user_servers(email: str) -> tuple[str, list[_UserServerInfo]]:
         session.close()
 
 
+# ---------- Inbounds ----------
+
 def _build_inbounds() -> list[dict]:
     return [
         {
@@ -107,10 +116,14 @@ def _build_inbounds() -> list[dict]:
     ]
 
 
+# ---------- Outbounds ----------
+
 def _build_proxy_outbound(info: _UserServerInfo, tag: str) -> dict:
+    flag = get_flag_for_server(info.server_name)
     return {
         "tag": tag,
         "protocol": "vless",
+        "remarks": f"{flag} {info.server_name} | {info.email}",
         "settings": {
             "vnext": [
                 {
@@ -144,6 +157,127 @@ def _build_proxy_outbound(info: _UserServerInfo, tag: str) -> dict:
         },
     }
 
+
+# ---------- Кастомные правила ----------
+
+CUSTOM_ROUTING_PATH = Path(
+    os.getenv("CUSTOM_ROUTING_PATH", "data/routing_custom.json")
+)
+
+
+def _load_custom_routing() -> dict:
+    empty = {
+        "direct_domains": [],
+        "direct_ips": [],
+        "block_domains": [],
+        "block_ips": [],
+        "proxy_domains": [],
+        "proxy_ips": [],
+    }
+    if not CUSTOM_ROUTING_PATH.exists():
+        return empty
+
+    try:
+        with CUSTOM_ROUTING_PATH.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return empty
+
+    for key in empty:
+        if key not in data or not isinstance(data[key], list):
+            data[key] = []
+    return data
+
+
+def _build_routing_rules(default_proxy_tag: str = "proxy") -> list[dict]:
+    """
+    Собирает правила маршрутизации.
+
+    ВАЖНО: Xray применяет логическое И, если в правиле и domain, и ip.
+    Поэтому ВСЕГДА разделяем их на отдельные правила.
+    """
+    custom = _load_custom_routing()
+    rules: list[dict] = []
+
+    # 1. Кастомные блокировки — раздельно
+    if custom["block_domains"]:
+        rules.append({
+            "type": "field",
+            "outboundTag": "block",
+            "domain": custom["block_domains"],
+        })
+    if custom["block_ips"]:
+        rules.append({
+            "type": "field",
+            "outboundTag": "block",
+            "ip": custom["block_ips"],
+        })
+
+    # 2. Кастомные direct — раздельно
+    if custom["direct_domains"]:
+        rules.append({
+            "type": "field",
+            "outboundTag": "direct",
+            "domain": custom["direct_domains"],
+        })
+    if custom["direct_ips"]:
+        rules.append({
+            "type": "field",
+            "outboundTag": "direct",
+            "ip": custom["direct_ips"],
+        })
+
+    # 3. Кастомные принудительные proxy — раздельно
+    if custom["proxy_domains"]:
+        rules.append({
+            "type": "field",
+            "outboundTag": default_proxy_tag,
+            "domain": custom["proxy_domains"],
+        })
+    if custom["proxy_ips"]:
+        rules.append({
+            "type": "field",
+            "outboundTag": default_proxy_tag,
+            "ip": custom["proxy_ips"],
+        })
+
+    # 4. Стандартные правила — раздельно
+    rules.append({
+        "type": "field",
+        "outboundTag": "block",
+        "domain": ["geosite:category-ads-all"],
+    })
+    rules.append({
+        "type": "field",
+        "outboundTag": "direct",
+        "ip": ["geoip:private"],
+    })
+    rules.append({
+        "type": "field",
+        "outboundTag": "direct",
+        "domain": [
+            "geosite:category-gov-ru",
+            "geosite:cn",
+            "geosite:private",
+        ],
+    })
+    rules.append({
+        "type": "field",
+        "outboundTag": "direct",
+        "ip": ["geoip:ru", "geoip:cn"],
+    })
+
+    # 5. Финал
+    rules.append({
+        "type": "field",
+        "network": "tcp,udp",
+        "outboundTag": default_proxy_tag,
+    })
+
+    return rules
+
+
+# ---------- Основная сборка ----------
 
 def build_client_config(email: str, primary_only: bool = True) -> dict:
     user_uuid, servers = _fetch_user_servers(email)
@@ -202,127 +336,3 @@ def build_client_config_json(email: str, primary_only: bool = True) -> str:
     """Возвращает JSON-строку клиентского конфига."""
     config = build_client_config(email, primary_only=primary_only)
     return json.dumps(config, indent=2, ensure_ascii=False)
-
-CUSTOM_ROUTING_PATH = Path(
-    os.getenv("CUSTOM_ROUTING_PATH", "data/routing_custom.json")
-)
-
-
-def _load_custom_routing() -> dict:
-    """
-    Читает пользовательские правила из файла.
-    Если файла нет — возвращает пустую структуру.
-    """
-    empty = {
-        "direct_domains": [],
-        "direct_ips": [],
-        "block_domains": [],
-        "block_ips": [],
-        "proxy_domains": [],
-        "proxy_ips": [],
-    }
-    if not CUSTOM_ROUTING_PATH.exists():
-        return empty
-
-    try:
-        with CUSTOM_ROUTING_PATH.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return empty
-
-    # Объединяем с пустой структурой, чтобы все ключи были
-    for key in empty:
-        if key not in data or not isinstance(data[key], list):
-            data[key] = []
-    return data
-
-class ConfigBuildError(Exception):
-    pass
-
-
-def _build_routing_rules(default_proxy_tag: str = "proxy") -> list[dict]:
-    """
-    Собирает список правил маршрутизации.
-    
-    ВАЖНО: Xray применяет логическое И, если в правиле указаны и domain, и ip.
-    Поэтому ВСЕГДА разделяем их на отдельные правила.
-    """
-    custom = _load_custom_routing()
-    rules: list[dict] = []
-
-    # 1. Кастомные блокировки — раздельно
-    if custom["block_domains"]:
-        rules.append({
-            "type": "field",
-            "outboundTag": "block",
-            "domain": custom["block_domains"],
-        })
-    if custom["block_ips"]:
-        rules.append({
-            "type": "field",
-            "outboundTag": "block",
-            "ip": custom["block_ips"],
-        })
-
-    # 2. Кастомные direct — раздельно
-    if custom["direct_domains"]:
-        rules.append({
-            "type": "field",
-            "outboundTag": "direct",
-            "domain": custom["direct_domains"],
-        })
-    if custom["direct_ips"]:
-        rules.append({
-            "type": "field",
-            "outboundTag": "direct",
-            "ip": custom["direct_ips"],
-        })
-
-    # 3. Кастомные принудительные proxy — раздельно
-    if custom["proxy_domains"]:
-        rules.append({
-            "type": "field",
-            "outboundTag": default_proxy_tag,
-            "domain": custom["proxy_domains"],
-        })
-    if custom["proxy_ips"]:
-        rules.append({
-            "type": "field",
-            "outboundTag": default_proxy_tag,
-            "ip": custom["proxy_ips"],
-        })
-
-    # 4. Стандартные правила — УЖЕ раздельно
-    rules.append({
-        "type": "field",
-        "outboundTag": "block",
-        "domain": ["geosite:category-ads-all"],
-    })
-    rules.append({
-        "type": "field",
-        "outboundTag": "direct",
-        "ip": ["geoip:private"],
-    })
-    rules.append({
-        "type": "field",
-        "outboundTag": "direct",
-        "domain": [
-            "geosite:category-gov-ru",
-            "geosite:cn",
-            "geosite:private",
-        ],
-    })
-    rules.append({
-        "type": "field",
-        "outboundTag": "direct",
-        "ip": ["geoip:ru", "geoip:cn"],
-    })
-
-    # 5. Финал
-    rules.append({
-        "type": "field",
-        "network": "tcp,udp",
-        "outboundTag": default_proxy_tag,
-    })
-
-    return rules

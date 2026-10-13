@@ -15,7 +15,7 @@ from core.user_manager import (
     UserManagerError,
 )
 from db.database import init_db, get_session
-from db.models import User, Server
+from db.models import User, Server, UserServer
 
 app = typer.Typer(help="Управление пользователями")
 console = Console()
@@ -311,3 +311,110 @@ def add_bulk_cmd(
         for email, reason in failed:
             err_table.add_row(email, reason)
         console.print(err_table)
+
+@app.command("show")
+def show_cmd(
+    email: str = typer.Option(..., "--email", "-e", help="Email пользователя"),
+):
+    """Показать детали пользователя: серверы, UUID, ссылки."""
+    init_db()
+
+    session = get_session()
+    try:
+        user = session.query(User).filter_by(email=email).one_or_none()
+        if not user:
+            console.print(Panel(f"[red]Пользователь '{email}' не найден.[/red]"))
+            raise typer.Exit(code=1)
+
+        public_url = os.getenv("PUBLIC_URL", "http://172.16.200.204:8080").rstrip("/")
+
+        # Основная инфо
+        console.print(Panel(
+            f"Email:    [bold]{user.email}[/bold]\n"
+            f"UUID:     {user.uuid}\n"
+            f"Token:    {user.token}\n"
+            f"Создан:   {user.created_at.strftime('%Y-%m-%d %H:%M') if user.created_at else '—'}\n\n"
+            f"[bold]Ссылка:[/bold] {public_url}/go/{user.token}\n"
+            f"[bold]JSON:[/bold]   {public_url}/sub/{user.token}/xray.json",
+            title=f"Пользователь: {user.email}",
+            border_style="cyan",
+        ))
+
+        # Серверы
+        links = (
+            session.query(UserServer, Server)
+            .join(Server, UserServer.server_id == Server.id)
+            .filter(UserServer.user_id == user.id)
+            .order_by(Server.name)
+            .all()
+        )
+
+        if not links:
+            console.print("[yellow]Пользователь не привязан ни к одному серверу.[/yellow]")
+            return
+
+        table = Table(title="Серверы", show_lines=False)
+        table.add_column("Сервер", style="cyan")
+        table.add_column("Host")
+        table.add_column("Порт")
+        table.add_column("UUID")
+        table.add_column("Flow")
+
+        for link_row, server in links:
+            table.add_row(
+                server.name,
+                server.host,
+                str(server.xray_port),
+                link_row.uuid[:16] + "...",
+                link_row.flow or "—",
+            )
+
+        console.print(table)
+    finally:
+        session.close()
+
+@app.command("export-links")
+def export_links_cmd(
+    output: str = typer.Option(
+        "data/all_users.links.txt",
+        "--output", "-o",
+        help="Путь к выходному файлу",
+    ),
+):
+    """Выгрузить все ссылки пользователей в файл (email<TAB>ссылка)."""
+    init_db()
+
+    session = get_session()
+    try:
+        users = session.query(User).order_by(User.email).all()
+        if not users:
+            console.print("[yellow]Пользователей нет.[/yellow]")
+            return
+
+        public_url = os.getenv("PUBLIC_URL", "http://172.16.200.204:8080").rstrip("/")
+
+        output_path = Path(output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with output_path.open("w", encoding="utf-8") as f:
+            for user in users:
+                link = f"{public_url}/go/{user.token}"
+                f.write(f"{user.email}\t{link}\n")
+
+        console.print(Panel(
+            f"[green]Готово[/green]\n\n"
+            f"Пользователей: [bold]{len(users)}[/bold]\n"
+            f"Файл:          [bold]{output_path}[/bold]",
+            title="Экспорт ссылок",
+            border_style="green",
+        ))
+
+        # Первые 5 строк для проверки
+        console.print("\n[dim]Первые 5 строк:[/dim]")
+        with output_path.open("r", encoding="utf-8") as f:
+            for i, line in enumerate(f):
+                if i >= 5:
+                    break
+                console.print(f"  {line.rstrip()}")
+    finally:
+        session.close()

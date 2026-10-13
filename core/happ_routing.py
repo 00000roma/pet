@@ -3,11 +3,23 @@
 Генерация routing-конфига для Happ (deep link).
 
 Формат: happ://routing/add/{base64url(json)}
+
+Используется полный формат Happ:
+- geosite/geoip для массовых правил
+- кастомные domain: из data/routing_custom.json
+- зеркала jsdelivr для загрузки geosite.dat/geoip.dat (доступны из РФ)
+
+ВАЖНО: Happ скачивает geosite.dat/geoip.dat при ВЫКЛЮЧЕННОМ VPN.
 """
 from __future__ import annotations
 
 import base64
 import json
+
+
+# Зеркала jsdelivr — доступны из РФ, стабильнее github.com
+GEOIP_URL = "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat"
+GEOSITE_URL = "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat"
 
 
 ROUTING_PRESETS = {
@@ -18,7 +30,6 @@ ROUTING_PRESETS = {
             "geosite:category-gov-ru",
             "geosite:category-ru",
             "geosite:cn",
-            "domain:rktv.ru",
         ],
         "direct_ips": [
             "10.0.0.0/8",
@@ -64,9 +75,9 @@ ROUTING_PRESETS = {
 
 def build_happ_routing(preset: str = "ru", custom_name: str | None = None) -> dict:
     """
-    Строит routing для Happ, объединяя:
-    - базовые правила пресета
-    - кастомные правила из data/routing_custom.json
+    Строит routing для Happ:
+    - базовые правила пресета (geosite/geoip)
+    - кастомные правила из data/routing_custom.json (domain:rktv.ru и т.п.)
     """
     from core.xray_config_builder import _load_custom_routing
 
@@ -76,7 +87,7 @@ def build_happ_routing(preset: str = "ru", custom_name: str | None = None) -> di
     base = ROUTING_PRESETS[preset]
     custom = _load_custom_routing()
 
-    # Объединяем базовые + кастомные правила (без дубликатов)
+    # Объединяем базовые + кастомные, убираем дубликаты
     def merge(a, b):
         return list(dict.fromkeys(a + b))
 
@@ -101,8 +112,8 @@ def build_happ_routing(preset: str = "ru", custom_name: str | None = None) -> di
         "DomesticDNSIP": "8.8.8.8",
         "DomesticDNSType": "DoH",
         "FakeDNS": "false",
-        "Geoipurl": "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat",
-        "Geositeurl": "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat",
+        "Geoipurl": GEOIP_URL,
+        "Geositeurl": GEOSITE_URL,
         "GlobalProxy": base["global_proxy"],
         "Name": custom_name or base["name"],
         "RemoteDNSDomain": "https://cloudflare-dns.com/dns-query",
@@ -111,9 +122,10 @@ def build_happ_routing(preset: str = "ru", custom_name: str | None = None) -> di
         "RouteOrder": "block-direct-proxy",
     }
 
+
 def build_happ_deep_link(preset: str = "ru", custom_name: str | None = None) -> str:
     routing = build_happ_routing(preset=preset, custom_name=custom_name)
     json_str = json.dumps(routing, separators=(",", ":"), ensure_ascii=False)
     encoded = base64.urlsafe_b64encode(json_str.encode("utf-8")).decode("ascii")
     encoded = encoded.rstrip("=")
-    return f"happ://routing/add/{encoded}"
+    return f"happ://routing/onadd/{encoded}"

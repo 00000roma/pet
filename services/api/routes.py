@@ -1,6 +1,7 @@
 # services/api/routes.py
 from __future__ import annotations
 
+import base64
 import os
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -54,6 +55,9 @@ def sub_xray_json(token: str) -> Response:
     except ConfigBuildError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
+    # Deep link с правилами маршрутизации — для автоматической привязки в Happ
+    routing_link = build_happ_deep_link(preset="ru", custom_name="Reactive")
+
     return Response(
         content=config_json,
         media_type="application/json; charset=utf-8",
@@ -61,6 +65,8 @@ def sub_xray_json(token: str) -> Response:
             "Content-Disposition": f'inline; filename="xray-{user.email}.json"',
             "Profile-Title": "Reactive",
             "Profile-Update-Interval": "24",
+            # ← Автоматическое применение правил маршрутизации в Happ
+            "routing": routing_link,
         },
     )
 
@@ -117,6 +123,28 @@ def sub_happ_routing_raw(token: str) -> Response:
     return Response(content=deep_link, media_type="text/plain; charset=utf-8")
 
 
+@router.get("/sub/{token}", response_class=PlainTextResponse)
+def sub_base64(token: str) -> Response:
+    """Base64-подписка для Happ (vless:// с флагами)."""
+    user = _get_user_by_token(token)
+    try:
+        links = get_user_links(user.email)
+    except SubscriptionError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    raw = "\n".join(l.link for l in links)
+    encoded = base64.b64encode(raw.encode("utf-8")).decode("ascii")
+
+    return Response(
+        content=encoded,
+        media_type="text/plain; charset=utf-8",
+        headers={
+            "Profile-Update-Interval": "24",
+            "Profile-Title": "Reactive",
+        },
+    )
+
+
 @router.get("/go/{token}", response_class=HTMLResponse)
 def go_page(token: str, request: Request) -> Response:
     """Главная ссылка для пользователя — добавляет подписку в Happ."""
@@ -145,6 +173,13 @@ def go_page(token: str, request: Request) -> Response:
         .btn-secondary {{ background: #34c759; }}
         .btn-secondary:hover {{ background: #248a3d; }}
         .note {{ font-size: 14px; color: #999; margin-top: 30px; }}
+        .info {{
+            background: #fff8e1; border-left: 4px solid #ffa000;
+            padding: 16px; border-radius: 8px; margin: 20px 0;
+            text-align: left;
+        }}
+        .info p {{ margin: 0 0 8px 0; font-weight: 600; color: #e65100; }}
+        .info ol {{ margin: 0; padding-left: 20px; color: #555; line-height: 1.6; }}
     </style>
 </head>
 <body>
@@ -157,6 +192,15 @@ def go_page(token: str, request: Request) -> Response:
        href="{base}/sub/{token}/happ-routing">
         Применить правила маршрутизации
     </a>
+
+    <div class="info">
+        <p>⚠️ Если правила не применились автоматически:</p>
+        <ol>
+            <li>Откройте Happ → <b>Серверы</b> → <b>Reactive</b> → <b>⋮</b> → <b>Настройки</b>.</li>
+            <li>В разделе <b>«Выбор правила»</b> выберите профиль <b>«Reactive»</b>.</li>
+            <li>Подключитесь к VPN.</li>
+        </ol>
+    </div>
 
     <p class="note">Если ссылка не открылась — скопируйте её в Happ вручную:</p>
     <div style="background:white;padding:14px;border-radius:8px;

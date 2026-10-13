@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 from urllib.parse import urlencode
 
+from core.flags import get_flag_for_server
 from db.database import get_session
 from db.models import Server, User, UserServer
 
@@ -38,16 +39,15 @@ def _build_vless_link(
     vless://uuid@host:port?type=xhttp&security=reality&pbk=...&fp=chrome&sni=...&sid=...&spx=%2F&path=%2Fxhttp&mode=auto#label
     """
     params = {
-        "type": "xhttp",           # было "tcp"
+        "type": "xhttp",
         "security": "reality",
         "pbk": public_key,
         "fp": fingerprint,
         "sni": sni,
         "sid": short_id,
         "spx": "/",
-        "path": "/xhttp",          # ← новый параметр для XHTTP
-        "mode": "auto",            # ← и этот
-        # flow НЕ указываем — он несовместим с XHTTP
+        "path": "/xhttp",
+        "mode": "auto",
     }
     query = urlencode(params)
     return f"vless://{uuid}@{host}:{port}?{query}#{label}"
@@ -76,7 +76,10 @@ def get_user_links(email: str) -> list[UserLink]:
             server_names = json.loads(server.reality_server_names or "[]")
             short_ids = json.loads(server.reality_short_ids or "[]")
             if not server_names or not short_ids:
-                continue  # неполные данные — пропускаем
+                continue
+
+            # ← ФЛАГ для имени сервера
+            flag = get_flag_for_server(server.name)
 
             link = _build_vless_link(
                 uuid=link_row.uuid,
@@ -85,7 +88,7 @@ def get_user_links(email: str) -> list[UserLink]:
                 public_key=server.reality_public_key,
                 sni=server_names[0],
                 short_id=short_ids[0],
-                label=f"{server.name} | {email}",
+                label=f"{flag} {server.name} | {email}",
             )
             links.append(
                 UserLink(
@@ -100,10 +103,7 @@ def get_user_links(email: str) -> list[UserLink]:
 
 
 def get_subscription_base64(email: str) -> str:
-    """
-    Возвращает подписку в формате Base64 (как её ожидают клиенты типа v2rayNG, Streisand).
-    Внутри — список vless:// ссылок, разделённых переводом строки.
-    """
+    """Base64-подписка для v2rayNG/Streisand/Happ."""
     links = get_user_links(email)
     raw = "\n".join(l.link for l in links)
     encoded = base64.b64encode(raw.encode("utf-8")).decode("ascii")
