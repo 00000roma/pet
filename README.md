@@ -4,12 +4,15 @@ sudo docker compose exec -it xray-manager python main.py
 Редактирование правил routing
 sudo nano /opt/xray-manager/data/routing_custom.json
 
+# Xray Manager — управление Xray (VLESS + Reality + XHTTP) и подписками
 
-# Reactive — управление Xray (VLESS + Reality + XHTTP) и подписками
+**Xray Manager** — консольная утилита + HTTP-сервис для управления Xray-серверами и раздачи персональных подписок пользователям через клиенты **Happ**, **Nekoray**, **v2rayNG**.
 
-**Reactive** — это консольная утилита + HTTP-сервис для управления Xray-серверами и раздачи персональных подписок пользователям через клиенты **Happ**, **Nekoray**, **v2rayNG**.
-
-Проект создан для внутреннего использования: позволяет быстро развернуть Xray на новом сервере, импортировать существующие серверы, управлять пользователями и раздавать им **одну короткую ссылку**, которая автоматически настраивает подключение и правила маршрутизации.
+Проект создан для администраторов, которые хотят:
+- быстро развернуть Xray на новых серверах,
+- импортировать существующие без изменения конфигов,
+- управлять пользователями из одной консоли,
+- раздавать **одну короткую ссылку**, которая настраивает клиент автоматически.
 
 ---
 
@@ -47,8 +50,8 @@ sudo nano /opt/xray-manager/data/routing_custom.json
 ### 1. Клонирование проекта
 
 ```bash
-git clone https://github.com/00000roma/pet.git
-cd pet
+git clone https://github.com/<your-username>/xray-manager.git
+cd xray-manager
 ```
 
 ### 2. Настройка `.env`
@@ -62,7 +65,7 @@ cp .env.example .env
 **Заполни**:
 
 ```env
-PUBLIC_URL=https://update.rktv.ru
+PUBLIC_URL=https://sub.example.com
 HTTP_PORT=8080
 SSH_DIR=/root/.ssh
 DEFAULT_SSH_USER=root
@@ -74,29 +77,43 @@ LOG_LEVEL=INFO
 - **`PUBLIC_URL`** — публичный домен, на котором работает сервис подписок (HTTPS).
 - **`SSH_DIR`** — путь к папке с SSH-ключами **на хосте** (внутри Docker-контейнера это всегда `/root/.ssh`).
 
-### 3. Установка на управляемый сервер (VPS)
+### 3. Подготовка SSH-ключа
 
-Установи **Docker** на VPS (**Ubuntu**):
+**Сгенерируй** **SSH-ключ** **на** **машине** **админа** (**если** **ещё** **нет**):
+
+```bash
+ssh-keygen -t ed25519 -C "xray-manager" -f ~/.ssh/id_ed25519 -N ""
+```
+
+**Публичную** **часть** **отдай** **админу** **серверов** — **он** **добавит** **её** **в** `~/.ssh/authorized_keys` **на** **root**.
+
+**Проверь** **доступ**:
+
+```bash
+ssh -i ~/.ssh/id_ed25519 root@<SERVER_IP> "echo OK"
+```
+
+### 4. Развёртывание Xray на сервере
+
+**Установи** **Docker** **на** **сервере** (**Ubuntu**):
 
 ```bash
 curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker $USER
 ```
 
-**Скопируй SSH-ключ** на VPS (**с машины админа**):
+**Скопируй** **SSH-ключ** **на** **сервер**:
 
 ```bash
-scp ~/.ssh/id_ed25519 root@<VPS_IP>:/root/.ssh/id_ed25519
-ssh root@<VPS_IP> "chmod 700 /root/.ssh && chmod 600 /root/.ssh/id_ed25519"
+scp ~/.ssh/id_ed25519 root@<SERVER_IP>:/root/.ssh/id_ed25519
+ssh root@<SERVER_IP> "chmod 700 /root/.ssh && chmod 600 /root/.ssh/id_ed25519"
 ```
 
-### 4. Установка Reactive на VPS
-
-**Склонируй** проект **на** VPS:
+**Склонируй** **проект**:
 
 ```bash
-git clone https://github.com/00000roma/pet.git
-cd pet
+git clone https://github.com/<your-username>/xray-manager.git
+cd xray-manager
 cp .env.example .env
 nano .env   # укажи PUBLIC_URL
 ```
@@ -121,7 +138,7 @@ curl http://localhost:8080/health
 
 ### CLI-команды
 
-**Показать список команд**:
+**Показать** **список** **команд**:
 
 ```bash
 docker compose exec xray-manager python main.py --help
@@ -164,10 +181,10 @@ docker compose exec -it xray-manager python main.py
 | `GET /sub/{token}/happ-routing` | HTML-страница с кнопкой «Открыть в Happ» для routing |
 | `GET /sub/{token}/happ-routing/raw` | Сырой deep link `happ://routing/onadd/...` |
 
-**Пример использования**:
+**Пример** **использования**:
 
 ```
-https://update.rktv.ru/go/q374rZmnb70nreOnmMrWqQ39Q4ovMQRZ
+https://sub.example.com/go/<USER_TOKEN>
 ```
 
 Пользователь **тапает** → **Happ** → **подписка добавлена** → **routing применён автоматически**.
@@ -176,13 +193,13 @@ https://update.rktv.ru/go/q374rZmnb70nreOnmMrWqQ39Q4ovMQRZ
 
 ## 🗺 Правила маршрутизации
 
-**Правила** хранятся в `data/routing_custom.json` **на** VPS (**не** **в** **git**).
+**Правила** **хранятся** **в** `data/routing_custom.json` **на** **сервере** (**не** **в** **git**).
 
 ### Структура
 
 ```json
 {
-    "direct_domains": ["domain:rktv.ru", "domain:jira.rktv.ru"],
+    "direct_domains": ["domain:example.com", "domain:internal.example.com"],
     "direct_ips": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"],
     "block_domains": [],
     "block_ips": [],
@@ -256,23 +273,23 @@ docker compose up -d --build
 
 ### Подписка не открывается
 
-1. **Проверь** `curl http://localhost:8080/health` **на** VPS.
-2. **Проверь**, что домен (**PUBLIC_URL**) **резолвится** **в** **публичный** **IP**.
-3. **Проверь** HTTPS-**сертификат** (**NPM**, **Caddy**).
+1. **Проверь** `curl http://localhost:8080/health` **на** **сервере**.
+2. **Проверь**, **что** **домен** (**PUBLIC_URL**) **резолвится** **в** **публичный** **IP**.
+3. **Проверь** **HTTPS-сертификат** (**NPM**, **Caddy**).
 
 ### Happ не применяет routing
 
-1. **Проверь**, что в `/sub/{token}/xray.json` **есть** **заголовок** `routing:`.
-2. **Проверь**, что профиль `Reactive` **появился** **в** **Happ** → **Routing**.
+1. **Проверь**, **что** **в** `/sub/{token}/xray.json` **есть** **заголовок** `routing:`.
+2. **Проверь**, **что** **профиль** **появился** **в** **Happ** → **Routing**.
 3. **Если** **не** **появился** — **примени** **вручную**:
    ```
-   https://update.rktv.ru/sub/{token}/happ-routing
+   https://sub.example.com/sub/{token}/happ-routing
    ```
 
 ### Флаги стран не отображаются
 
-- **Happ** **читает** **имя** **из** `#label` **в** **Base64**-подписке.
-- **Убедись**, что **пользователь** **использует** `/sub/{token}`, **а** **не** `/sub/{token}/xray.json`.
+- **Happ** **читает** **имя** **из** `#label` **в** **Base64-подписке**.
+- **Убедись**, **что** **пользователь** **использует** `/sub/{token}`, **а** **не** `/sub/{token}/xray.json`.
 
 ### Telegram Desktop не работает
 
@@ -292,7 +309,7 @@ docker compose up -d --build
   "domain:openai.com",
   "domain:youtube.com"
   ```
-- **Проверь**, **что** `routing_custom.json` — **валидный** JSON:
+- **Проверь**, **что** `routing_custom.json` — **валидный** **JSON**:
   ```bash
   python3 -m json.tool data/routing_custom.json
   ```
@@ -312,41 +329,39 @@ xray-manager/
 ├── README.md
 │
 ├── core/                       # Бизнес-логика
-│   ├── ssh_client.py           # Обёртка над Fabric
-│   ├── config_parser.py        # Парсинг config.json
-│   ├── xray_config_builder.py  # Генерация JSON-подписки
-│   ├── happ_routing.py         # Генерация deep link для Happ
-│   ├── subscription.py         # Генерация vless:// ссылок
-│   ├── user_manager.py         # CRUD пользователей
-│   ├── server_manager.py       # Импорт/деплой серверов
-│   ├── installer.py            # Установка Xray (wget)
-│   ├── reality.py              # Генерация ключей Reality
-│   └── flags.py                # Флаги стран
+│   ├── ssh_client.py
+│   ├── config_parser.py
+│   ├── xray_config_builder.py
+│   ├── happ_routing.py
+│   ├── subscription.py
+│   ├── user_manager.py
+│   ├── server_manager.py
+│   ├── installer.py
+│   ├── reality.py
+│   └── flags.py
 │
-├── cli/                        # CLI-команды
-│   ├── menu.py                 # Интерактивное меню
+├── cli/
+│   ├── menu.py
 │   ├── server_commands.py
 │   ├── user_commands.py
 │   ├── sub_commands.py
 │   └── serve_commands.py
 │
-├── services/                   # HTTP-сервис
+├── services/
 │   └── api/
-│       ├── app.py              # FastAPI-приложение
-│       └── routes.py           # Эндпоинты
+│       ├── app.py
+│       └── routes.py
 │
-├── db/                         # База данных
+├── db/
 │   ├── models.py
 │   └── database.py
 │
 ├── templates/
-│   └── xray_config_base.json   # Шаблон конфига Xray
+│   └── xray_config_base.json
 │
-└── data/                       # Данные (не в git)
+└── data/
     ├── xray_manager.db
     ├── routing_custom.json
-    ├── users.txt
-    ├── users.links.txt
     └── logs/
 ```
 
