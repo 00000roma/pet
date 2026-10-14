@@ -23,6 +23,13 @@ class Server(Base):
     ssh_key_path: Mapped[str] = mapped_column(String(512), nullable=False)
 
     xray_port: Mapped[int] = mapped_column(Integer, default=443)
+
+    # Транспорт: xhttp или grpc
+    network: Mapped[str] = mapped_column(String(16), default="xhttp")
+    grpc_service_name: Mapped[str] = mapped_column(String(64), default="")
+    xhttp_path: Mapped[str] = mapped_column(String(64), default="/xhttp")
+    xhttp_mode: Mapped[str] = mapped_column(String(16), default="auto")
+
     reality_dest: Mapped[str] = mapped_column(String(128), default="")
     reality_server_names: Mapped[str] = mapped_column(Text, default="[]")
     reality_private_key: Mapped[str] = mapped_column(Text, default="")
@@ -33,7 +40,6 @@ class Server(Base):
 
     status: Mapped[str] = mapped_column(String(32), default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
 
 class User(Base):
     __tablename__ = "users"

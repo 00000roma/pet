@@ -89,16 +89,20 @@ def import_existing_server(
         server = Server(
             name=name,
             host=host,
-            managed=False,
             ssh_port=ssh_port,
             ssh_user=ssh_user,
             ssh_key_path=ssh_key_path,
             xray_port=inbound.port,
+            network=inbound.network,
+            grpc_service_name=inbound.grpc_service_name,
+            xhttp_path=inbound.xhttp_path,
+            xhttp_mode=inbound.xhttp_mode,
             reality_dest=inbound.dest,
             reality_server_names=json.dumps(inbound.server_names),
             reality_private_key=inbound.private_key,
             reality_public_key=public_key,
             reality_short_ids=json.dumps(inbound.short_ids),
+            managed=False,
         )
         session.add(server)
         session.flush()
@@ -273,11 +277,13 @@ def deploy_fresh(
         server = Server(
             name=name,
             host=host,
-            managed=True,
             ssh_port=ssh_port,
             ssh_user=ssh_user,
             ssh_key_path=ssh_key_path,
             xray_port=xray_port,
+            network="xhttp",
+            xhttp_path="/xhttp",
+            xhttp_mode="auto",
             reality_dest=dest,
             reality_server_names=json.dumps(server_names),
             reality_private_key=private_key,

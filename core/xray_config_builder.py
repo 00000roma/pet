@@ -33,13 +33,13 @@ class _UserServerInfo:
     public_key: str
     sni: str
     short_id: str
-    path: str = "/xhttp"
-    mode: str = "auto"
+    network: str = "xhttp"          # ← xhttp | grpc
+    grpc_service_name: str = ""     # ← для gRPC
+    xhttp_path: str = "/xhttp"      # ← для XHTTP
+    xhttp_mode: str = "auto"        # ← для XHTTP
     fingerprint: str = "chrome"
     spider_x: str = "/"
-    network: str = "xhttp"
     security: str = "reality"
-
 
 # ---------- Загрузка пользователей и серверов ----------
 
@@ -77,6 +77,10 @@ def _fetch_user_servers(email: str) -> tuple[str, list[_UserServerInfo]]:
                     public_key=server.reality_public_key,
                     sni=server_names[0],
                     short_id=short_ids[0],
+                    network=server.network or "xhttp",
+                    grpc_service_name=server.grpc_service_name or "",
+                    xhttp_path=server.xhttp_path or "/xhttp",
+                    xhttp_mode=server.xhttp_mode or "auto",
                 )
             )
         if not result:
@@ -120,6 +124,32 @@ def _build_inbounds() -> list[dict]:
 
 def _build_proxy_outbound(info: _UserServerInfo, tag: str) -> dict:
     flag = get_flag_for_server(info.server_name)
+
+    # Базовый streamSettings (общий для xhttp и grpc)
+    stream_settings: dict = {
+        "network": info.network,
+        "security": info.security,
+        "realitySettings": {
+            "show": False,
+            "serverName": info.sni,
+            "publicKey": info.public_key,
+            "shortId": info.short_id,
+            "fingerprint": info.fingerprint,
+            "spiderX": info.spider_x,
+        },
+    }
+
+    # Транспорт — XHTTP или gRPC
+    if info.network == "xhttp":
+        stream_settings["xhttpSettings"] = {
+            "path": info.xhttp_path,
+            "mode": info.xhttp_mode,
+        }
+    elif info.network == "grpc":
+        stream_settings["grpcSettings"] = {
+            "serviceName": info.grpc_service_name,
+        }
+
     return {
         "tag": tag,
         "protocol": "vless",
@@ -139,24 +169,8 @@ def _build_proxy_outbound(info: _UserServerInfo, tag: str) -> dict:
                 }
             ]
         },
-        "streamSettings": {
-            "network": info.network,
-            "security": info.security,
-            "realitySettings": {
-                "show": False,
-                "serverName": info.sni,
-                "publicKey": info.public_key,
-                "shortId": info.short_id,
-                "fingerprint": info.fingerprint,
-                "spiderX": info.spider_x,
-            },
-            "xhttpSettings": {
-                "path": info.path,
-                "mode": info.mode,
-            },
-        },
+        "streamSettings": stream_settings,
     }
-
 
 # ---------- Кастомные правила ----------
 

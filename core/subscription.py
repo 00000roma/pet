@@ -31,24 +31,37 @@ def _build_vless_link(
     sni: str,
     short_id: str,
     label: str,
+    network: str = "xhttp",           # ← xhttp | grpc
+    grpc_service_name: str = "",      # ← для gRPC
+    xhttp_path: str = "/xhttp",       # ← для XHTTP
+    xhttp_mode: str = "auto",         # ← для XHTTP
     fingerprint: str = "chrome",
 ) -> str:
     """
-    Собирает клиентскую ссылку vless:// для Reality + XHTTP.
-    Пример:
-    vless://uuid@host:port?type=xhttp&security=reality&pbk=...&fp=chrome&sni=...&sid=...&spx=%2F&path=%2Fxhttp&mode=auto#label
+    Собирает клиентскую ссылку vless:// для Reality + XHTTP/gRPC.
+
+    Пример XHTTP:
+      vless://uuid@host:port?type=xhttp&security=reality&pbk=...&fp=chrome&sni=...&sid=...&spx=%2F&path=%2Fxhttp&mode=auto#label
+
+    Пример gRPC:
+      vless://uuid@host:port?type=grpc&security=reality&pbk=...&fp=chrome&sni=...&sid=...&spx=%2F&serviceName=reactive#label
     """
     params = {
-        "type": "xhttp",
+        "type": network,
         "security": "reality",
         "pbk": public_key,
         "fp": fingerprint,
         "sni": sni,
         "sid": short_id,
         "spx": "/",
-        "path": "/xhttp",
-        "mode": "auto",
     }
+
+    if network == "xhttp":
+        params["path"] = xhttp_path
+        params["mode"] = xhttp_mode
+    elif network == "grpc":
+        params["serviceName"] = grpc_service_name
+
     query = urlencode(params)
     return f"vless://{uuid}@{host}:{port}?{query}#{label}"
 
@@ -89,6 +102,10 @@ def get_user_links(email: str) -> list[UserLink]:
                 sni=server_names[0],
                 short_id=short_ids[0],
                 label=f"{flag} {server.name} | {email}",
+                network=server.network or "xhttp",
+                grpc_service_name=server.grpc_service_name or "",
+                xhttp_path=server.xhttp_path or "/xhttp",
+                xhttp_mode=server.xhttp_mode or "auto",
             )
             links.append(
                 UserLink(

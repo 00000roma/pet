@@ -13,6 +13,8 @@ from core.user_manager import (
     remove_user,
     list_users,
     UserManagerError,
+    _get_server,           # ← НОВОЕ
+    _sync_users_batch,     # ← НОВОЕ (мы его используем в add-bulk)
 )
 from db.database import init_db, get_session
 from db.models import User, Server, UserServer
@@ -185,11 +187,11 @@ def add_bulk_cmd(
     file: str = typer.Option(..., "--file", "-f", help="Путь к файлу со списком email"),
     servers: str = typer.Option("all", "--servers", "-s", help="ID серверов или 'all'"),
     skip_existing: bool = typer.Option(
-        True, "--skip-existing",
-        help="Пропускать существующих пользователей",
+        True, "--skip-existing/--no-skip-existing",
+        help="Пропускать существующих пользователей (по умолчанию — да)",
     ),
 ):
-    """Создать пользователей из файла (один email на строку)."""
+    """Создать пользователей из файла (один email на строку). Батчевая обработка."""
     init_db()
 
     # 1. Читаем файл
@@ -233,83 +235,181 @@ def add_bulk_cmd(
         console.print("[yellow]Нет серверов.[/yellow]")
         raise typer.Exit(code=1)
 
-    # 3. Создаём пользователей
-    created: list[dict] = []
-    existing: list[str] = []
+    # 3. Собираем список новых пользователей (создаём User в БД, но не синхронизируем)
+    import uuid as _uuid
+    session = get_session()
+    try:
+        existing_emails = {u.email for u in session.query(User).all()}
+    finally:
+        session.close()
+
+    new_users: list[dict] = []
+    existing_users: list[str] = []
+
+    session = get_session()
+    try:
+        for email in emails:
+            if email in existing_emails:
+                # Пользователь уже есть — используем существующий User
+                user = session.query(User).filter_by(email=email).one()
+                new_users.append({
+                    "uuid": None,   # заполним ниже per-server
+                    "email": user.email,
+                    "user_id": user.id,
+                    "is_new": False,
+                })
+                existing_users.append(email)
+            else:
+                # Создаём нового User с токеном
+                user = User(
+                    uuid=str(_uuid.uuid4()),
+                    email=email,
+                    token=__import__("secrets").token_urlsafe(24),
+                )
+                session.add(user)
+                session.flush()
+                new_users.append({
+                    "uuid": user.uuid,
+                    "email": user.email,
+                    "user_id": user.id,
+                    "is_new": True,
+                })
+                existing_emails.add(email)
+        session.commit()
+    finally:
+        session.close()
+
+    console.print(
+        f"[green]Пользователей: {len(new_users)}[/green] "
+        f"([dim]новых: {sum(1 for u in new_users if u['is_new'])}, "
+        f"существующих: {sum(1 for u in new_users if not u['is_new'])}[/dim])"
+    )
+
+    # 4. Для каждого сервера — БАТЧ-синхронизация
+    created_links: list[dict] = []
     failed: list[tuple[str, str]] = []
 
-    with console.status(f"[cyan]Создаю {len(emails)} пользователей...[/cyan]"):
-        for email in emails:
-            try:
-                uuid_str, results = add_user(email=email, server_ids=server_ids)
+    for sid in server_ids:
+        try:
+            server = _get_server(sid)
+        except UserManagerError as e:
+            failed.append((f"server-{sid}", str(e)))
+            continue
 
-                failed_servers = [r for r in results if r.status == "error"]
-                if failed_servers:
-                    failed.append((
-                        email,
-                        "; ".join(f"{r.server_name}: {r.message}" for r in failed_servers),
-                    ))
-                    continue
+        # Готовим список users с UUID для этого сервера
+        server_users: list[dict] = []
+        for u in new_users:
+            server_uuid = str(_uuid.uuid4())    # новый UUID для этого сервера
+            server_users.append({
+                "uuid": server_uuid,
+                "email": u["email"],
+                "flow": "",
+            })
+            created_links.append({
+                "server_id": server.id,
+                "server_name": server.name,
+                "user_id": u["user_id"],
+                "email": u["email"],
+                "uuid": server_uuid,
+            })
 
-                session = get_session()
-                try:
-                    user = session.query(User).filter_by(email=email).one()
-                    token = user.token
-                finally:
-                    session.close()
+        # Синхронизируем ВСЕХ пользователей за один SSH + один рестарт Xray
+        try:
+            with console.status(
+                f"[cyan]Добавляю {len(server_users)} пользователей на {server.name} "
+                f"(один рестарт Xray)...[/cyan]"
+            ):
+                results = _sync_users_batch(server, server_users)
 
-                created.append({"email": email, "token": token})
+            # Считаем успехи/ошибки
+            ok_count = sum(1 for r in results if r.status == "ok")
+            err_count = sum(1 for r in results if r.status == "error")
+            console.print(
+                f"  [green]✓[/green] {server.name}: "
+                f"[green]{ok_count}[/green] ok, "
+                f"[red]{err_count}[/red] ошибок"
+            )
 
-            except UserManagerError as e:
-                msg = str(e).lower()
-                if "already exists" in msg or "уже" in msg:
-                    if skip_existing:
-                        existing.append(email)
-                        continue
-                failed.append((email, str(e)))
-            except Exception as e:
-                failed.append((email, str(e)))
+            for r in results:
+                if r.status == "error":
+                    failed.append((server.name, r.message))
+        except Exception as e:
+            failed.append((server.name, str(e)))
+            continue
 
-    # 4. Итог
+    # 5. Сохраняем связи UserServer в БД (одним батчем)
+    session = get_session()
+    try:
+        for link in created_links:
+            exists = (
+                session.query(UserServer)
+                .filter_by(user_id=link["user_id"], server_id=link["server_id"])
+                .one_or_none()
+            )
+            if exists:
+                continue
+            session.add(UserServer(
+                user_id=link["user_id"],
+                server_id=link["server_id"],
+                uuid=link["uuid"],
+                flow="",
+            ))
+        session.commit()
+    finally:
+        session.close()
+
+    # 6. Итог
     console.print()
     console.print(Panel(
-        f"[green]Создано:[/green] {len(created)}\n"
-        f"[yellow]Уже существует:[/yellow] {len(existing)}\n"
+        f"[green]Пользователей создано:[/green] {sum(1 for u in new_users if u['is_new'])}\n"
+        f"[yellow]Уже существовало:[/yellow] {sum(1 for u in new_users if not u['is_new'])}\n"
         f"[red]Ошибок:[/red] {len(failed)}",
         title="Готово",
         border_style="green" if not failed else "yellow",
     ))
 
-    # 5. Таблица ссылок
-    if created:
-        public_url = os.getenv("PUBLIC_URL", "http://172.16.200.204:8080").rstrip("/")
+    # 7. Таблица ссылок
+    public_url = os.getenv("PUBLIC_URL", "http://172.16.200.204:8080").rstrip("/")
+
+    if new_users:
         table = Table(title="Ссылки для пользователей", show_lines=False)
         table.add_column("Email", style="cyan")
         table.add_column("Ссылка")
 
-        for item in created:
-            link = f"{public_url}/go/{item['token']}"
-            table.add_row(item["email"], link)
+        # Получаем токены для всех
+        session = get_session()
+        try:
+            for u in new_users:
+                user = session.query(User).filter_by(id=u["user_id"]).one()
+                link = f"{public_url}/go/{user.token}"
+                table.add_row(u["email"], link)
+        finally:
+            session.close()
 
         console.print(table)
 
         # Сохраняем в файл
         output_path = path.with_suffix(".links.txt")
-        with output_path.open("w", encoding="utf-8") as f:
-            for item in created:
-                link = f"{public_url}/go/{item['token']}"
-                f.write(f"{item['email']}\t{link}\n")
+        session = get_session()
+        try:
+            with output_path.open("w", encoding="utf-8") as f:
+                for u in new_users:
+                    user = session.query(User).filter_by(id=u["user_id"]).one()
+                    link = f"{public_url}/go/{user.token}"
+                    f.write(f"{u['email']}\t{link}\n")
+        finally:
+            session.close()
 
         console.print(f"[dim]Ссылки сохранены в {output_path}[/dim]")
 
-    # 6. Ошибки
+    # 8. Ошибки
     if failed:
         console.print()
         err_table = Table(title="Ошибки", show_lines=False)
-        err_table.add_column("Email", style="red")
+        err_table.add_column("Источник", style="red")
         err_table.add_column("Причина")
-        for email, reason in failed:
-            err_table.add_row(email, reason)
+        for src, reason in failed:
+            err_table.add_row(src, reason)
         console.print(err_table)
 
 @app.command("show")

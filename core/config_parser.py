@@ -15,9 +15,12 @@ class RealityInbound:
     private_key: str
     short_ids: list[str]
     flow: str
+    network: str = "xhttp"           # xhttp | grpc | tcp | ws
+    grpc_service_name: str = ""      # для gRPC
+    xhttp_path: str = "/xhttp"       # для XHTTP
+    xhttp_mode: str = "auto"         # для XHTTP
     clients: list[dict] = field(default_factory=list)
     raw: dict = field(default_factory=dict)
-
 
 class ConfigError(Exception):
     pass
@@ -50,6 +53,11 @@ def parse_config(config_text: str) -> RealityInbound:
         if clients and clients[0].get("flow"):
             flow = clients[0]["flow"]
 
+        # Определяем транспорт
+        network = stream.get("network", "tcp")
+        grpc_settings = stream.get("grpcSettings", {}) or {}
+        xhttp_settings = stream.get("xhttpSettings", {}) or {}
+
         return RealityInbound(
             port=int(inbound.get("port", 443)),
             dest=reality.get("dest", ""),
@@ -57,6 +65,10 @@ def parse_config(config_text: str) -> RealityInbound:
             private_key=reality.get("privateKey", ""),
             short_ids=list(reality.get("shortIds", []) or []),
             flow=flow,
+            network=network,
+            grpc_service_name=grpc_settings.get("serviceName", ""),
+            xhttp_path=xhttp_settings.get("path", "/xhttp"),
+            xhttp_mode=xhttp_settings.get("mode", "auto"),
             clients=copy.deepcopy(clients),
             raw=copy.deepcopy(inbound),
         )
