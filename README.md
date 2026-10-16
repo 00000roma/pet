@@ -143,7 +143,8 @@ curl http://localhost:8080/health
 ```bash
 docker compose exec xray-manager python main.py --help
 ```
-
+cd /opt/xray-manager
+sudo docker compose exec xray-manager python ....
 **Основные**:
 
 | Команда | Описание |
