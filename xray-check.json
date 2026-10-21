@@ -54,12 +54,12 @@
       "settings": {
         "vnext": [
           {
-            "address": "45.159.174.120",
+            "address": "12.12.12.12",
             "port": 443,
             "users": [
               {
-                "id": "15ea3b3f-1925-491a-b48c-28e7eadce5e9",
-                "email": "roman.denisov",
+                "id": "15ea3b3f-1e7eadce5e9",
+                "email": "roman",
                 "encryption": "none"
               }
             ]
