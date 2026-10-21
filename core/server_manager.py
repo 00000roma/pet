@@ -533,3 +533,32 @@ def edit_server(
         }
     finally:
         session.close()
+
+
+def get_actual_network(server_id: int) -> str | None:
+    """Читает реальный транспорт VLESS+Reality inbound с сервера (не из БД).
+
+    БД может рассинхронизироваться с config.json (например, после ALTER TABLE
+    с DEFAULT 'xhttp'), поэтому для смены транспорта важно смотреть именно
+    на сервер. Возвращает 'xhttp' | 'grpc' | None (если не удалось прочитать).
+    """
+    session = get_session()
+    try:
+        server = session.query(Server).filter_by(id=server_id).one_or_none()
+    finally:
+        session.close()
+
+    if not server:
+        return None
+
+    try:
+        ssh = XrayServer(
+            host=server.host,
+            ssh_port=server.ssh_port,
+            ssh_user=server.ssh_user,
+            key_path=server.ssh_key_path,
+        )
+        with ssh.session():
+            return parse_config(ssh.read_config_auto()).network or "xhttp"
+    except Exception:
+        return None

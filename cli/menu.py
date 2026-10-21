@@ -18,6 +18,7 @@ from core.server_manager import (
     deploy_fresh,
     get_server_status,
     edit_server,
+    get_actual_network,
     ImportError_,
 )
 from core.ssh_client import SSHError
@@ -417,11 +418,24 @@ def _servers_change_transport(sid: int | None = None) -> None:
         if not server:
             _error(f"Сервер ID={sid} не найден.")
             return
-        current_network = server.network or "xhttp"
+        db_network = server.network or "xhttp"
+        server_name = server.name
+        server_host = server.host
     finally:
         session.close()
 
-    console.rule(f"[bold]Смена транспорта: {server.name}[/bold]")
+    # Читаем реальный транспорт с сервера, а не из БД: БД может рассинхронизироваться
+    # с config.json (например, после ALTER TABLE с DEFAULT 'xhttp'), и тогда смена
+    # молча пропускалась из-за `new_network == current_network`.
+    actual_network = get_actual_network(sid)
+    current_network = actual_network or db_network
+
+    console.rule(f"[bold]Смена транспорта: {server_name}[/bold]")
+    if actual_network and actual_network != db_network:
+        console.print(
+            f"[yellow]Внимание: в БД '{db_network}', а на сервере реально "
+            f"'{actual_network}' — использую серверное значение.[/yellow]"
+        )
     console.print(f"[dim]Текущий транспорт: [cyan]{current_network}[/cyan][/dim]\n")
 
     new_network = questionary.select(
@@ -444,7 +458,7 @@ def _servers_change_transport(sid: int | None = None) -> None:
 
     console.print(Panel(
         f"Меняю транспорт [bold]{current_network} → {new_network}[/bold]\n"
-        f"на сервере [bold]{server.name}[/bold] ({server.host}).\n\n"
+        f"на сервере [bold]{server_name}[/bold] ({server_host}).\n\n"
         "[yellow]Reality-ключи, UUID пользователей и порт не меняются.[/yellow]",
         title="Подтверждение",
     ))
