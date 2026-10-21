@@ -4,6 +4,7 @@
 #
 # Примеры:
 #   xray-manager                        # открыть интерактивное меню
+#   xray-manager run server list        # 'run' — необязательный синоним
 #   xray-manager server list            # список серверов
 #   xray-manager user add -e u@x -s all # добавить пользователя
 #   xray-manager sub url -e u@x         # короткая ссылка подписки
@@ -33,6 +34,11 @@ fi
 TTY_FLAGS="-i"
 if [ -t 0 ]; then
     TTY_FLAGS="-it"
+fi
+
+# `run` — необязательный синоним: xray-manager run server list == xray-manager server list
+if [ "${1:-}" = "run" ]; then
+    shift
 fi
 
 exec $DOCKER_BIN compose exec $TTY_FLAGS xray-manager python main.py "$@"

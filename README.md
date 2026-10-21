@@ -168,34 +168,79 @@ curl http://localhost:8080/health
 
 ## 🖥 Использование
 
-### CLI-команды
+### Короткая команда `xray-manager`
 
-После установки доступна короткая команда `xray-manager` (и alias `xrm`) — её можно запускать из **любой** папки:
+После установки доступна короткая команда `xray-manager` — её можно запускать из **любой** папки. Это обёртка над `docker compose exec`, поэтому вместо длинной строки
+
+```bash
+cd /opt/xray-manager && sudo docker compose exec -it xray-manager python main.py <КОМАНДА>
+```
+
+достаточно писать коротко:
+
+```bash
+xray-manager <КОМАНДА>
+```
+
+**Алиасы:**
+
+| Команда | Что делает |
+|---|---|
+| `xray-manager` | Открыть интерактивное меню |
+| `xray-manager <КОМАНДА>` | Выполнить команду CLI (например `server list`) |
+| `xray-manager run <КОМАНДА>` | То же самое — `run` необязательный синоним |
+| `xrm` | Сокращение для `xray-manager` (создаётся при установке) |
+
+> Хочешь ещё короче — добавь в `~/.bashrc` (или `~/.zshrc`) строку `alias xr='xray-manager'` и выполни `source ~/.bashrc`.
+
+Полная справка по всем командам:
 
 ```bash
 xray-manager --help
 ```
-cd /opt/xray-manager
-sudo docker compose exec xray-manager python ....
-**Основные**:
+
+### CLI-команды
+
+**Серверы** (`server`):
 
 | Команда | Описание |
 |---|---|
-| `xray-manager` | Открыть интерактивное меню |
-| `xray-manager server list` | Список серверов |
-| `xray-manager server add --host <IP> --key <KEY> --name <NAME>` | Развернуть новый Xray |
-| `xray-manager server import --host <IP> --key <KEY> --name <NAME>` | Импортировать существующий |
-| `xray-manager user add --email <EMAIL> --servers all` | Добавить пользователя |
-| `xray-manager user add-bulk --file data/users.txt --servers all` | Пакетное создание (файл: один email на строку) |
-| `xray-manager user list` | Список пользователей |
-| `xray-manager user list --with-links` | Список со ссылками на подписки |
-| `xray-manager sub url --email <EMAIL>` | **Короткая ссылка** `https://.../go/{token}` |
-| `xray-manager sub url --all` | Все короткие ссылки |
-| `xray-manager user show --email <EMAIL>` | Детали пользователя |
-| `xray-manager user remove --email <EMAIL>` | Удалить пользователя |
+| `xray-manager server list` | Список серверов из БД |
+| `xray-manager server add --host <IP> --key <KEY> [--name <N>] [--dest <D>]` | Развернуть Xray с нуля на чистом сервере |
+| `xray-manager server import --host <IP> --key <KEY> [--name <N>]` | Импортировать существующий сервер (read-only) |
+| `xray-manager server status --id <ID>` | Статус сервера (порт, ping, конфиг) |
+| `xray-manager server edit --id <ID> [--port] [--dest] [--sni] [--network xhttp/grpc]` | Изменить параметры сервера |
 
-> Без обёртки те же команды можно запускать напрямую:
-> `docker compose exec -it xray-manager python main.py ...`
+**Пользователи** (`user`):
+
+| Команда | Описание |
+|---|---|
+| `xray-manager user add --email <EMAIL> --servers all` | Добавить пользователя на все серверы |
+| `xray-manager user add --email <EMAIL> --servers 1,2,3` | Добавить на конкретные серверы |
+| `xray-manager user add-bulk --file data/users.txt --servers all` | Пакетное создание (один email на строку) |
+| `xray-manager user list [--with-links]` | Список пользователей |
+| `xray-manager user show --email <EMAIL>` | Детали пользователя (UUID, токен, серверы) |
+| `xray-manager user remove --email <EMAIL> [--yes]` | Удалить пользователя |
+| `xray-manager user export-links [--output data/all_users.links.txt]` | Выгрузить `email<TAB>ссылка` в файл |
+
+**Подписки** (`sub`):
+
+| Команда | Описание |
+|---|---|
+| `xray-manager sub url --email <EMAIL>` | **Короткая ссылка** `https://.../go/{token}` |
+| `xray-manager sub url --all` | Все короткие ссылки (таблица) |
+| `xray-manager sub show --email <EMAIL>` | `vless://` ссылки пользователя |
+| `xray-manager sub show --email <EMAIL> --base64` | Подписка в Base64 |
+| `xray-manager sub happ --email <EMAIL>` | Happ routing deep-link |
+
+**Сервис** (`serve`):
+
+| Команда | Описание |
+|---|---|
+| `xray-manager serve run` | Запустить HTTP-сервер подписок вручную (обычно уже запущен контейнером) |
+
+> Без обёртки те же команды запускаются напрямую:
+> `sudo docker compose exec -it xray-manager python main.py ...`
 
 ### Интерактивное меню
 
@@ -204,6 +249,8 @@ xray-manager
 ```
 
 Откроется **меню** с разделами: **Серверы**, **Пользователи**, **HTTP-сервер**.
+
+> Меню требует настоящий TTY. При запуске из скрипта/CI (без TTY) используй команды напрямую, например `xray-manager server list`.
 
 При запуске меню выводятся пути к ключевым файлам (БД, правила routing, `.env`, файл для `add-bulk`). Пункт **«Показать ссылки пользователя»** выводит одну короткую ссылку с токеном вида `https://.../go/{token}` — удобно копировать и отдавать пользователю.
 
@@ -311,6 +358,14 @@ cd /opt/xray-manager
 sudo docker compose pull
 sudo docker compose up -d
 ```
+
+> Если обновлялась обёртка `xray-manager` (или alias `xrm`), обнови её вручную:
+>
+> ```bash
+> sudo curl -fsSL https://raw.githubusercontent.com/00000roma/pet/refs/heads/main/script/xray-manager -o /usr/local/bin/xray-manager
+> sudo chmod +x /usr/local/bin/xray-manager
+> sudo ln -sf /usr/local/bin/xray-manager /usr/local/bin/xrm
+> ```
 
 **Разработка (сборка из исходников):**
 
