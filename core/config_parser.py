@@ -153,3 +153,52 @@ def update_reality_settings(
         reality["serverNames"] = list(new_server_names)
 
     return json.dumps(data, indent=2, ensure_ascii=False)
+
+
+def update_transport(
+    config_text: str,
+    *,
+    new_network: str,
+    grpc_service_name: str | None = None,
+    xhttp_path: str | None = None,
+    xhttp_mode: str | None = None,
+) -> str:
+    """
+    Меняет транспорт VLESS+Reality inbound (xhttp | grpc).
+
+    - xhttp: убирает grpcSettings, ставит xhttpSettings {mode, path}
+    - grpc:  убирает xhttpSettings, ставит grpcSettings {serviceName}
+
+    Reality-параметры, порт и клиентов (id/email) не трогает.
+    flow у клиентов убирается — для XHTTP/gRPC он не используется.
+    Возвращает обновлённый JSON.
+    """
+    if new_network not in ("xhttp", "grpc"):
+        raise ConfigError(
+            f"Неподдерживаемый транспорт: {new_network} (нужно 'xhttp' или 'grpc')"
+        )
+
+    data = json.loads(config_text)
+    inbound = _find_vless_reality_inbound(data)
+    stream = inbound.setdefault("streamSettings", {})
+
+    stream["network"] = new_network
+    stream.pop("grpcSettings", None)
+    stream.pop("xhttpSettings", None)
+
+    if new_network == "xhttp":
+        stream["xhttpSettings"] = {
+            "mode": xhttp_mode or "auto",
+            "path": xhttp_path or "/xhttp",
+        }
+    else:  # grpc
+        stream["grpcSettings"] = {
+            "serviceName": grpc_service_name or "reactive",
+        }
+
+    # Для XHTTP/gRPC flow (xtls-rprx-vision) не используется — убираем.
+    clients = inbound.get("settings", {}).get("clients", [])
+    for client in clients:
+        client.pop("flow", None)
+
+    return json.dumps(data, indent=2, ensure_ascii=False)

@@ -6,6 +6,7 @@ import sys
 import typer
 from rich.console import Console
 from rich.panel import Panel
+from rich.table import Table
 
 from core.subscription import (
     get_user_links,
@@ -102,3 +103,51 @@ def happ_cmd(
         border_style="cyan",
     ))
     console.print(deep_link)
+
+
+@app.command("url")
+def url_cmd(
+    email: str = typer.Option(None, "--email", "-e", help="Email пользователя"),
+    all_users: bool = typer.Option(False, "--all", help="Показать ссылки для всех пользователей"),
+):
+    """Показать короткую ссылку подписки вида {PUBLIC_URL}/go/{token}."""
+    from core.links import get_go_url
+    from db.database import init_db, get_session
+    from db.models import User
+
+    init_db()
+
+    session = get_session()
+    try:
+        if all_users:
+            users = session.query(User).order_by(User.email).all()
+        else:
+            if not email:
+                console.print("[yellow]Укажи --email или --all.[/yellow]")
+                raise typer.Exit(code=1)
+            user = session.query(User).filter_by(email=email).one_or_none()
+            if not user:
+                console.print(Panel(
+                    f"[red]Пользователь '{email}' не найден.[/red]", title="Ошибка"
+                ))
+                raise typer.Exit(code=1)
+            users = [user]
+
+        if not users:
+            console.print("[yellow]Пользователей нет.[/yellow]")
+            return
+
+        # Один пользователь → голая ссылка (удобно копировать)
+        if not all_users:
+            _print_raw(get_go_url(users[0].token))
+            return
+
+        # Все пользователи → таблица
+        table = Table(title="Ссылки подписок", show_lines=False)
+        table.add_column("Email", style="cyan")
+        table.add_column("Ссылка")
+        for u in users:
+            table.add_row(u.email, get_go_url(u.token))
+        console.print(table)
+    finally:
+        session.close()

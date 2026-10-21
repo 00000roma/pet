@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import typer
@@ -18,6 +17,7 @@ from core.user_manager import (
 )
 from db.database import init_db, get_session
 from db.models import User, Server, UserServer
+from core.links import get_public_url
 
 app = typer.Typer(help="Управление пользователями")
 console = Console()
@@ -85,7 +85,7 @@ def add_cmd(
     try:
         user = session.query(User).filter_by(email=email).one_or_none()
         if user:
-            public_url = os.getenv("PUBLIC_URL", "http://172.16.200.204:8080").rstrip("/")
+            public_url = get_public_url()
             console.print()
             console.print(Panel(
                 f"Email: [bold]{user.email}[/bold]\n"
@@ -157,7 +157,7 @@ def list_cmd(
     if with_links:
         table.add_column("Ссылка")
 
-    public_url = os.getenv("PUBLIC_URL", "http://172.16.200.204:8080").rstrip("/")
+    public_url = get_public_url()
 
     session = get_session()
     try:
@@ -369,7 +369,7 @@ def add_bulk_cmd(
     ))
 
     # 7. Таблица ссылок
-    public_url = os.getenv("PUBLIC_URL", "http://172.16.200.204:8080").rstrip("/")
+    public_url = get_public_url()
 
     if new_users:
         table = Table(title="Ссылки для пользователей", show_lines=False)
@@ -426,7 +426,7 @@ def show_cmd(
             console.print(Panel(f"[red]Пользователь '{email}' не найден.[/red]"))
             raise typer.Exit(code=1)
 
-        public_url = os.getenv("PUBLIC_URL", "http://172.16.200.204:8080").rstrip("/")
+        public_url = get_public_url()
 
         # Основная инфо
         console.print(Panel(
@@ -491,7 +491,7 @@ def export_links_cmd(
             console.print("[yellow]Пользователей нет.[/yellow]")
             return
 
-        public_url = os.getenv("PUBLIC_URL", "http://172.16.200.204:8080").rstrip("/")
+        public_url = get_public_url()
 
         output_path = Path(output)
         output_path.parent.mkdir(parents=True, exist_ok=True)

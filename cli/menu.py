@@ -27,11 +27,7 @@ from core.user_manager import (
     list_users,
     UserManagerError,
 )
-from core.subscription import (
-    get_user_links,
-    get_subscription_base64,
-    SubscriptionError,
-)
+from core.links import get_go_url
 
 from services.server_runner import (
     start_server,
@@ -81,6 +77,23 @@ def _success(msg: str) -> None:
     console.print(Panel(f"[green]{msg}[/green]", title="Готово", border_style="green"))
 
 
+def _show_paths() -> None:
+    """Показывает ключевые пути (вызывается при запуске меню)."""
+    from db.database import DB_PATH
+    from core.xray_config_builder import CUSTOM_ROUTING_PATH
+
+    console.print(Panel.fit(
+        "[bold]Где что лежит:[/bold]\n"
+        f"  [cyan]База данных:[/cyan]  {DB_PATH}\n"
+        f"  [cyan]Маршрутизация:[/cyan]  {CUSTOM_ROUTING_PATH}\n"
+        f"  [cyan]Настройки:[/cyan]  .env\n"
+        f"  [cyan]Файл add-bulk:[/cyan]  data/users.txt (один email на строку)\n"
+        f"      [dim]→ xray-manager user add-bulk --file data/users.txt[/dim]",
+        title="Пути",
+        border_style="cyan",
+    ))
+
+
 # ---------- Утилиты для серверов/юзеров ----------
 
 def _get_all_servers() -> list[Server]:
@@ -119,7 +132,6 @@ def main_menu() -> None:
             choices=[
                 "Серверы",
                 "Пользователи",
-                "Подписки",
                 "HTTP-сервер",
                 "Выход",
             ],
@@ -133,8 +145,6 @@ def main_menu() -> None:
             servers_menu()
         elif choice == "Пользователи":
             users_menu()
-        elif choice == "Подписки":
-            subscriptions_menu()
         elif choice == "HTTP-сервер":
             http_server_menu()
 
@@ -153,6 +163,7 @@ def servers_menu() -> None:
                 "Импортировать существующий",
                 "Проверить статус сервера",
                 "Редактировать сервер",
+                "Сменить транспорт (gRPC ↔ XHTTP)",
                 "Удалить сервер из БД",
                 "Переключить управление сервером",
                 "Назад",
@@ -177,6 +188,9 @@ def servers_menu() -> None:
         elif choice == "Редактировать сервер":       # ← НОВАЯ ОБРАБОТКА
             _servers_edit()
             _pause()
+        elif choice == "Сменить транспорт (gRPC ↔ XHTTP)":
+            _servers_change_transport()
+            _pause()
         elif choice == "Переключить управление сервером":
             _servers_toggle_managed()
             _pause()
@@ -196,12 +210,14 @@ def _servers_list() -> None:
     table.add_column("Имя")
     table.add_column("Host")
     table.add_column("Порт", justify="right")
+    table.add_column("Транспорт")
     table.add_column("dest")
     table.add_column("SNI")
 
     for s in servers:
         table.add_row(
             str(s.id), s.name, s.host, str(s.xray_port),
+            s.network or "xhttp",
             s.reality_dest,
             ", ".join(json.loads(s.reality_server_names or "[]")),
         )
@@ -277,13 +293,15 @@ def _servers_edit() -> None:
         current_port = server.xray_port
         current_dest = server.reality_dest
         current_sni = ", ".join(json.loads(server.reality_server_names or "[]"))
+        current_network = server.network or "xhttp"
     finally:
         session.close()
 
     console.rule(f"[bold]Редактирование: {server.name}[/bold]")
     console.print(f"[dim]Текущий порт: {current_port}[/dim]")
     console.print(f"[dim]Текущий dest: {current_dest}[/dim]")
-    console.print(f"[dim]Текущий SNI:  {current_sni}[/dim]\n")
+    console.print(f"[dim]Текущий SNI:  {current_sni}[/dim]")
+    console.print(f"[dim]Текущий транспорт: {current_network}[/dim]\n")
 
     # Спрашиваем, что менять
     field = questionary.select(
@@ -292,6 +310,7 @@ def _servers_edit() -> None:
             "Порт",
             "dest (маскировочный сайт)",
             "SNI (serverNames)",
+            "Транспорт (XHTTP / gRPC)",
             "Отмена",
         ],
         style=CUSTOM_STYLE,
@@ -303,6 +322,10 @@ def _servers_edit() -> None:
     new_port = None
     new_dest = None
     new_sni = None
+
+    if field == "Транспорт (XHTTP / gRPC)":
+        _servers_change_transport(sid=sid)
+        return
 
     if field == "Порт":
         new_port_str = questionary.text(
@@ -372,6 +395,84 @@ def _servers_edit() -> None:
 
     console.print(table)
     console.print("[dim]Xray перезапущен. Подписки обновятся автоматически.[/dim]")
+
+def _servers_change_transport(sid: int | None = None) -> None:
+    """Смена транспорта (XHTTP ↔ gRPC) на одном сервере «в одну кнопку»."""
+    if sid is None:
+        choices = _server_choices()
+        if not choices:
+            console.print("[yellow]Серверов нет.[/yellow]")
+            return
+        sid = questionary.select(
+            "На каком сервере сменить транспорт?",
+            choices=choices,
+            style=CUSTOM_STYLE,
+        ).ask()
+        if sid is None:
+            return
+
+    session = get_session()
+    try:
+        server = session.query(Server).filter_by(id=sid).one_or_none()
+        if not server:
+            _error(f"Сервер ID={sid} не найден.")
+            return
+        current_network = server.network or "xhttp"
+    finally:
+        session.close()
+
+    console.rule(f"[bold]Смена транспорта: {server.name}[/bold]")
+    console.print(f"[dim]Текущий транспорт: [cyan]{current_network}[/cyan][/dim]\n")
+
+    new_network = questionary.select(
+        "Новый транспорт:",
+        choices=[
+            questionary.Choice(
+                title="XHTTP — рекомендуется (маскировка под HTTPS, CDN)",
+                value="xhttp",
+            ),
+            questionary.Choice(
+                title="gRPC",
+                value="grpc",
+            ),
+        ],
+        style=CUSTOM_STYLE,
+    ).ask()
+
+    if new_network is None or new_network == current_network:
+        return
+
+    console.print(Panel(
+        f"Меняю транспорт [bold]{current_network} → {new_network}[/bold]\n"
+        f"на сервере [bold]{server.name}[/bold] ({server.host}).\n\n"
+        "[yellow]Reality-ключи, UUID пользователей и порт не меняются.[/yellow]",
+        title="Подтверждение",
+    ))
+    confirm = questionary.confirm(
+        "Продолжить? Xray будет перезапущен.",
+        default=False,
+        style=CUSTOM_STYLE,
+    ).ask()
+    if not confirm:
+        return
+
+    try:
+        with console.status("[cyan]Меняю транспорт и перезапускаю Xray...[/cyan]"):
+            result = edit_server(server_id=sid, new_network=new_network)
+    except (SSHError, ImportError_, Exception) as e:
+        _error(str(e))
+        return
+
+    _success(
+        f"Сервер '{result['name']}': транспорт "
+        f"{result['old_network']} → {result['new_network']}. Xray перезапущен, БД обновлена."
+    )
+    console.print(Panel(
+        "[yellow]Пользователям этого сервера нужно нажать «Обновить» в Happ,[/yellow] "
+        "чтобы подписка выдала новую ссылку (токен и UUID те же).",
+        border_style="yellow",
+    ))
+
 
 def _servers_add() -> None:
     console.rule("[bold]Добавление нового сервера[/bold]")
@@ -707,182 +808,18 @@ def _users_show_links() -> None:
     if not email:
         return
 
+    session = get_session()
     try:
-        links = get_user_links(email)
-    except SubscriptionError as e:
-        _error(str(e))
-        return
-
-    for item in links:
-        console.print(Panel(item.link, title=f"[cyan]{item.server_name}[/cyan]",
-                            border_style="cyan"))
-
-
-# ---------- Меню: Подписки ----------
-
-def subscriptions_menu() -> None:
-    while True:
-        _header()
-        console.rule("[bold]Подписки[/bold]")
-        choice = questionary.select(
-            "Что делать?",
-            choices=[
-                "Показать Base64-подписку",
-                "Показать сырые vless:// ссылки",
-                "Показать URL подписки",
-                "Показать URL всех форматов",           # ← НОВЫЙ
-                "Показать Happ routing (deep link)",    # ← НОВЫЙ
-                "Назад",
-            ],
-            style=CUSTOM_STYLE,
-        ).ask()
-
-        if choice is None or choice == "Назад":
+        user = session.query(User).filter_by(email=email).one_or_none()
+        if not user or not user.token:
+            _error(f"У пользователя '{email}' нет токена.")
             return
-        elif choice == "Показать Base64-подписку":
-            _sub_show_base64()
-            _pause()
-        elif choice == "Показать сырые vless:// ссылки":
-            _sub_show_raw()
-            _pause()
-        elif choice == "Показать URL подписки":
-            _sub_show_url()
-            _pause()
-        elif choice == "Показать URL всех форматов":
-            _sub_show_all_urls()
-            _pause()
-        elif choice == "Показать Happ routing (deep link)":
-            _sub_show_happ_routing()
-            _pause()
+        token = user.token
+    finally:
+        session.close()
 
-
-def _pick_user() -> str | None:
-    users = list_users()
-    if not users:
-        console.print("[yellow]Пользователей нет.[/yellow]")
-        return None
-    choices = [
-        questionary.Choice(title=u["email"], value=u["email"])
-        for u in users
-    ]
-    return questionary.select("Для кого?", choices=choices,
-                              style=CUSTOM_STYLE).ask()
-
-
-def _sub_show_base64() -> None:
-    email = _pick_user()
-    if not email:
-        return
-    try:
-        b64 = get_subscription_base64(email)
-    except SubscriptionError as e:
-        _error(str(e))
-        return
-    console.print(f"\n[bold]{email}[/bold] — Base64:\n")
-    console.print(b64)
-
-def _sub_show_all_urls() -> None:
-    """Показать все доступные URL подписок для пользователя."""
-    email = _pick_user()
-    if not email:
-        return
-
-    # Определяем хост — берём из .env или вычисляем
-    import os
-    host = os.getenv("PUBLIC_HOST", "localhost")
-    port = 8080
-    base = f"http://{host}:{port}"
-
-    console.print(Panel.fit(
-        f"[bold]Base64-подписка (универсально):[/bold]\n"
-        f"  {base}/sub/{email}\n\n"
-        f"[bold]Сырой список vless://:[/bold]\n"
-        f"  {base}/sub/{email}/raw\n\n"
-        f"[bold]Xray JSON с правилами (Nekoray/v2rayN):[/bold]\n"
-        f"  {base}/sub/{email}/xray.json\n\n"
-        f"[bold]Happ routing — страница с кнопкой:[/bold]\n"
-        f"  {base}/sub/{email}/happ-routing\n\n"
-        f"[bold]Happ routing — сырой deep link:[/bold]\n"
-        f"  {base}/sub/{email}/happ-routing/raw\n\n"
-        f"[bold]Информация:[/bold]\n"
-        f"  {base}/sub/{email}/info",
-        title=f"URL подписок для {email}",
-        border_style="cyan",
-    ))
-
-
-def _sub_show_happ_routing() -> None:
-    """Сгенерировать и показать Happ routing deep link."""
-    from core.happ_routing import build_happ_deep_link, ROUTING_PRESETS
-
-    email = _pick_user()
-    if not email:
-        return
-
-    preset = questionary.select(
-        "Какой пресет использовать?",
-        choices=[
-            questionary.Choice(
-                "Россия (реклама → block, РФ → direct)",
-                value="ru",
-            ),
-            questionary.Choice(
-                "Только AdBlock",
-                value="adblock",
-            ),
-            questionary.Choice(
-                "Глобально (всё через прокси)",
-                value="global",
-            ),
-        ],
-        style=CUSTOM_STYLE,
-    ).ask()
-    if not preset:
-        return
-
-    deep_link = build_happ_deep_link(
-        preset=preset,
-        custom_name=f"Reactive | {email}",
-    )
-
-    console.print(Panel.fit(
-        f"[bold]Deep link для {email}[/bold]\n"
-        f"Пресет: {preset}\n\n"
-        f"[dim]1. Скопируй ссылку ниже[/dim]\n"
-        f"[dim]2. Открой Happ → Routing → Импорт из буфера[/dim]\n"
-        f"[dim]3. Сохрани[/dim]",
-        title="Happ Routing",
-        border_style="cyan",
-    ))
-    console.print(deep_link)
-
-
-
-
-
-def _sub_show_raw() -> None:
-    email = _pick_user()
-    if not email:
-        return
-    try:
-        links = get_user_links(email)
-    except SubscriptionError as e:
-        _error(str(e))
-        return
-    for item in links:
-        console.print(Panel(item.link, title=item.server_name, border_style="cyan"))
-
-
-def _sub_show_url() -> None:
-    email = _pick_user()
-    if not email:
-        return
-    if not is_server_running():
-        console.print("[yellow]HTTP-сервер не запущен.[/yellow]")
-        return
-    url = get_server_url(port=8080)
-    console.print(f"\n[bold]URL подписки:[/bold] {url}/sub/{email}")
-    console.print("[dim]Вставь этот URL в клиент (Happ, v2rayNG, Nekoray).[/dim]")
+    # Голая ссылка с токеном — удобно копировать
+    console.print(get_go_url(token), soft_wrap=False)
 
 
 # ---------- Меню: HTTP-сервер ----------
@@ -953,6 +890,8 @@ def run_menu() -> None:
         except Exception as e:
             console.print(f"[yellow]Не удалось запустить HTTP-сервер: {e}[/yellow]")
 
+    _show_paths()
+    _pause()
     main_menu()
 
 def _servers_toggle_managed() -> None:

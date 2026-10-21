@@ -395,17 +395,27 @@ def edit_server(
     new_port: int | None = None,
     new_dest: str | None = None,
     new_server_names: list[str] | None = None,
+    new_network: str | None = None,
+    grpc_service_name: str | None = None,
+    xhttp_path: str | None = None,
+    xhttp_mode: str | None = None,
 ) -> dict:
     """
     Меняет параметры существующего сервера:
       - порт Xray
       - dest (маскировочный сайт)
       - serverNames (SNI)
+      - транспорт (xhttp | grpc)
 
     Обновляет config.json на сервере и БД.
     Перезапускает Xray.
     """
-    from core.config_parser import update_reality_settings
+    from core.config_parser import update_reality_settings, update_transport
+
+    if new_network is not None and new_network not in ("xhttp", "grpc"):
+        raise ImportError_(
+            f"Неподдерживаемый транспорт: {new_network} (нужно 'xhttp' или 'grpc')"
+        )
 
     session = get_session()
     try:
@@ -416,6 +426,14 @@ def edit_server(
         old_port = server.xray_port
         old_dest = server.reality_dest
         old_sni = list(json.loads(server.reality_server_names or "[]"))
+        old_network = server.network or "xhttp"
+        old_grpc_service_name = server.grpc_service_name or ""
+        old_xhttp_path = server.xhttp_path or "/xhttp"
+        old_xhttp_mode = server.xhttp_mode or "auto"
+
+        resolved_grpc = grpc_service_name or server.grpc_service_name or "reactive"
+        resolved_xhttp_path = xhttp_path or server.xhttp_path or "/xhttp"
+        resolved_xhttp_mode = xhttp_mode or server.xhttp_mode or "auto"
 
         ssh = XrayServer(
             host=server.host,
@@ -435,6 +453,15 @@ def edit_server(
                 new_dest=new_dest,
                 new_server_names=new_server_names,
             )
+
+            if new_network is not None:
+                updated = update_transport(
+                    updated,
+                    new_network=new_network,
+                    grpc_service_name=resolved_grpc,
+                    xhttp_path=resolved_xhttp_path,
+                    xhttp_mode=resolved_xhttp_mode,
+                )
 
             # 3. Валидируем (записываем во временный файл и проверяем)
             ssh.run(
@@ -475,6 +502,14 @@ def edit_server(
         if new_server_names is not None:
             server.reality_server_names = json.dumps(list(new_server_names))
 
+        if new_network is not None:
+            server.network = new_network
+            if new_network == "grpc":
+                server.grpc_service_name = resolved_grpc
+            else:
+                server.xhttp_path = resolved_xhttp_path
+                server.xhttp_mode = resolved_xhttp_mode
+
         session.commit()
 
         return {
@@ -487,6 +522,14 @@ def edit_server(
             "new_dest": server.reality_dest,
             "old_sni": old_sni,
             "new_sni": list(json.loads(server.reality_server_names or "[]")),
+            "old_network": old_network,
+            "new_network": server.network or "xhttp",
+            "old_grpc_service_name": old_grpc_service_name,
+            "new_grpc_service_name": server.grpc_service_name or "",
+            "old_xhttp_path": old_xhttp_path,
+            "new_xhttp_path": server.xhttp_path or "/xhttp",
+            "old_xhttp_mode": old_xhttp_mode,
+            "new_xhttp_mode": server.xhttp_mode or "auto",
         }
     finally:
         session.close()

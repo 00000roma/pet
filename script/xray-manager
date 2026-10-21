@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+#
+# xray-manager — удобная обёртка для запуска команд в Docker-контейнере.
+#
+# Примеры:
+#   xray-manager                        # открыть интерактивное меню
+#   xray-manager server list            # список серверов
+#   xray-manager user add -e u@x -s all # добавить пользователя
+#   xray-manager sub url -e u@x         # короткая ссылка подписки
+#
+# Переменные:
+#   XRAY_MANAGER_DIR — путь к проекту (по умолчанию /opt/xray-manager)
+#
+set -euo pipefail
+
+INSTALL_DIR="${XRAY_MANAGER_DIR:-/opt/xray-manager}"
+
+if [ ! -f "$INSTALL_DIR/docker-compose.yml" ]; then
+    echo "Ошибка: не найден $INSTALL_DIR/docker-compose.yml" >&2
+    echo "Укажи путь: XRAY_MANAGER_DIR=/path/to/xray-manager xray-manager ..." >&2
+    exit 1
+fi
+
+cd "$INSTALL_DIR"
+
+# Нужен ли sudo для docker
+DOCKER_BIN="docker"
+if [ "$(id -u)" -ne 0 ] && ! docker info >/dev/null 2>&1; then
+    DOCKER_BIN="sudo docker"
+fi
+
+# TTY нужен только для интерактивных команд (меню, подтверждения)
+TTY_FLAGS="-i"
+if [ -t 0 ]; then
+    TTY_FLAGS="-it"
+fi
+
+exec $DOCKER_BIN compose exec $TTY_FLAGS xray-manager python main.py "$@"

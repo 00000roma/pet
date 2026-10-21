@@ -1,9 +1,3 @@
-Сначала создаем ключи для ssh
-curl -fsSL https://raw.githubusercontent.com/00000roma/pet/refs/heads/main/script/install.sh | sudo bash
-sudo docker compose exec -it xray-manager python main.py
-Редактирование правил routing
-sudo nano /opt/xray-manager/data/routing_custom.json
-
 # Xray Manager — управление Xray (VLESS + Reality + XHTTP) и подписками
 
 **Xray Manager** — консольная утилита + HTTP-сервис для управления Xray-серверами и раздачи персональных подписок пользователям через клиент **Happ**.
@@ -13,6 +7,44 @@ sudo nano /opt/xray-manager/data/routing_custom.json
 - импортировать существующие без изменения конфигов,
 - управлять пользователями из одной консоли,
 - раздавать **одну короткую ссылку**, которая настраивает клиент автоматически.
+
+---
+
+## ⚡ Установка, запуск и обновление (кратко)
+
+### Установка одной командой (Linux-сервер с Docker)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/00000roma/pet/refs/heads/main/script/install.sh | sudo bash
+```
+
+Скрипт сам:
+1. Установит Docker (если его нет) и скачает образ `ghcr.io/00000roma/xray-manager:latest`.
+2. Создаст `/opt/xray-manager`, файл `.env` и `data/routing_custom.json`.
+3. Запустит контейнер и поставит команду `xray-manager` (alias `xrm`).
+
+### Запуск меню
+
+```bash
+xray-manager
+```
+
+Без обёртки — то же самое напрямую:
+
+```bash
+cd /opt/xray-manager && sudo docker compose exec -it xray-manager python main.py
+```
+
+### Обновление
+
+```bash
+cd /opt/xray-manager
+sudo docker compose pull
+sudo docker compose up -d
+```
+
+> Если собираешь образ из исходников (разработка) — вместо `pull`:
+> `git pull && sudo docker compose up -d --build`
 
 ---
 
@@ -138,10 +170,10 @@ curl http://localhost:8080/health
 
 ### CLI-команды
 
-**Показать** **список** **команд**:
+После установки доступна короткая команда `xray-manager` (и alias `xrm`) — её можно запускать из **любой** папки:
 
 ```bash
-docker compose exec xray-manager python main.py --help
+xray-manager --help
 ```
 cd /opt/xray-manager
 sudo docker compose exec xray-manager python ....
@@ -149,25 +181,31 @@ sudo docker compose exec xray-manager python ....
 
 | Команда | Описание |
 |---|---|
-| `python main.py` | Открыть интерактивное меню |
-| `python main.py server list` | Список серверов |
-| `python main.py server add --host <IP> --key <KEY> --name <NAME>` | Развернуть новый Xray |
-| `python main.py server import --host <IP> --key <KEY> --name <NAME>` | Импортировать существующий |
-| `python main.py user add --email <EMAIL> --servers all` | Добавить пользователя |
-| `python main.py user add-bulk --file users.txt --servers all` | Пакетное создание |
-| `python main.py user list` | Список пользователей |
-| `python main.py user list --with-links` | Список с ссылками на подписки |
-| `python main.py user show --email <EMAIL>` | Детали пользователя |
-| `python main.py user export-links` | Выгрузить все ссылки в файл |
-| `python main.py user remove --email <EMAIL>` | Удалить пользователя |
+| `xray-manager` | Открыть интерактивное меню |
+| `xray-manager server list` | Список серверов |
+| `xray-manager server add --host <IP> --key <KEY> --name <NAME>` | Развернуть новый Xray |
+| `xray-manager server import --host <IP> --key <KEY> --name <NAME>` | Импортировать существующий |
+| `xray-manager user add --email <EMAIL> --servers all` | Добавить пользователя |
+| `xray-manager user add-bulk --file data/users.txt --servers all` | Пакетное создание (файл: один email на строку) |
+| `xray-manager user list` | Список пользователей |
+| `xray-manager user list --with-links` | Список со ссылками на подписки |
+| `xray-manager sub url --email <EMAIL>` | **Короткая ссылка** `https://.../go/{token}` |
+| `xray-manager sub url --all` | Все короткие ссылки |
+| `xray-manager user show --email <EMAIL>` | Детали пользователя |
+| `xray-manager user remove --email <EMAIL>` | Удалить пользователя |
+
+> Без обёртки те же команды можно запускать напрямую:
+> `docker compose exec -it xray-manager python main.py ...`
 
 ### Интерактивное меню
 
 ```bash
-docker compose exec -it xray-manager python main.py
+xray-manager
 ```
 
-Откроется **меню** с разделами: **Серверы**, **Пользователи**, **Подписки**, **HTTP-сервер**.
+Откроется **меню** с разделами: **Серверы**, **Пользователи**, **HTTP-сервер**.
+
+При запуске меню выводятся пути к ключевым файлам (БД, правила routing, `.env`, файл для `add-bulk`). Пункт **«Показать ссылки пользователя»** выводит одну короткую ссылку с токеном вида `https://.../go/{token}` — удобно копировать и отдавать пользователю.
 
 ---
 
@@ -243,6 +281,19 @@ https://sub.example.com/go/<USER_TOKEN>
 
 ---
 
+## 🗂 Где что лежит
+
+| Путь в контейнере | Путь на хосте | Что это |
+|---|---|---|
+| `data/xray_manager.db` | `/opt/xray-manager/data/xray_manager.db` | База данных (пользователи, серверы, токены) |
+| `data/routing_custom.json` | `/opt/xray-manager/data/routing_custom.json` | Правила маршрутизации (direct / proxy / block) |
+| `.env` | `/opt/xray-manager/.env` | Настройки (`PUBLIC_URL`, SSH и т.д.) |
+| `data/users.txt` | `/opt/xray-manager/data/users.txt` | Файл для `user add-bulk` (один email на строку) |
+
+Эти же пути показываются при запуске меню `xray-manager`.
+
+---
+
 ## 🔧 Обслуживание
 
 ### Просмотр логов
@@ -251,22 +302,38 @@ https://sub.example.com/go/<USER_TOKEN>
 docker compose logs -f xray-manager
 ```
 
-### Обновление образа
+### Обновление
+
+**Установка через `install.sh` (образ из GHCR):**
+
+```bash
+cd /opt/xray-manager
+sudo docker compose pull
+sudo docker compose up -d
+```
+
+**Разработка (сборка из исходников):**
 
 ```bash
 git pull
-docker compose up -d --build
+sudo docker compose up -d --build
 ```
 
 ### Бэкап
 
-**Бэкапить** **надо**:
-- `data/xray_manager.db` — **БД** **с** **пользователями** **и** **серверами**.
-- `data/routing_custom.json` — **правила** **routing**.
-- `.env` — **конфиг**.
-- `/root/.ssh/id_ed25519` — **SSH-ключ** (**доступ** **к** **Xray-серверам**).
+**Что бэкапить** (всё в `/opt/xray-manager`):
 
-**Скрипт** **бэкапа** — `scripts/backup.sh`.
+| Файл | Что это |
+|---|---|
+| `data/xray_manager.db` | БД с пользователями и серверами |
+| `data/routing_custom.json` | Правила маршрутизации |
+| `.env` | Конфигурация |
+| `/root/.ssh/id_ed25519` | SSH-ключ доступа к Xray-серверам |
+
+```bash
+cd /opt/xray-manager
+tar czf xray-manager-backup-$(date +%F).tar.gz .env data/xray_manager.db data/routing_custom.json
+```
 
 ---
 
@@ -323,11 +390,15 @@ docker compose up -d --build
 xray-manager/
 ├── main.py                     # Точка входа CLI
 ├── requirements.txt
-├── Dockerfile
+├── dockerfile
 ├── docker-compose.yml
 ├── .env.example
 ├── .gitignore
 ├── README.md
+│
+├── script/
+│   ├── install.sh              # Установка одной командой
+│   └── xray-manager            # Обёртка для запуска из любой папки
 │
 ├── core/                       # Бизнес-логика
 │   ├── ssh_client.py
@@ -335,6 +406,7 @@ xray-manager/
 │   ├── xray_config_builder.py
 │   ├── happ_routing.py
 │   ├── subscription.py
+│   ├── links.py
 │   ├── user_manager.py
 │   ├── server_manager.py
 │   ├── installer.py
@@ -349,6 +421,8 @@ xray-manager/
 │   └── serve_commands.py
 │
 ├── services/
+│   ├── server_runner.py
+│   ├── subscription_updater.py
 │   └── api/
 │       ├── app.py
 │       └── routes.py
@@ -358,12 +432,13 @@ xray-manager/
 │   └── database.py
 │
 ├── templates/
+│   ├── install_xray.sh
 │   └── xray_config_base.json
 │
 └── data/
-    ├── xray_manager.db
-    ├── routing_custom.json
-    └── logs/
+    ├── xray_manager.db          # БД (создаётся при первом запуске)
+    ├── routing_custom.json      # Правила маршрутизации
+    └── users.txt                # Файл для add-bulk (один email на строку)
 ```
 
 ---

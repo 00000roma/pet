@@ -131,6 +131,7 @@ def list_cmd():
         table.add_column("Имя")
         table.add_column("Host")
         table.add_column("Порт", justify="right")
+        table.add_column("Транспорт")
         table.add_column("dest")
         table.add_column("SNI")
         table.add_column("Статус")
@@ -141,6 +142,7 @@ def list_cmd():
                 s.name,
                 s.host,
                 str(s.xray_port),
+                s.network or "xhttp",
                 s.reality_dest,
                 ", ".join(json.loads(s.reality_server_names or "[]")),
                 s.status,
@@ -208,15 +210,34 @@ def edit_cmd(
         None, "--sni",
         help="Новый SNI (serverNames), через запятую если несколько",
     ),
+    network: str = typer.Option(
+        None, "--network", help="Транспорт: xhttp или grpc",
+    ),
+    grpc_service_name: str = typer.Option(
+        None, "--grpc-service-name",
+        help="serviceName для gRPC (используется при --network grpc)",
+    ),
+    xhttp_path: str = typer.Option(
+        None, "--xhttp-path",
+        help="path для XHTTP (используется при --network xhttp)",
+    ),
+    xhttp_mode: str = typer.Option(
+        None, "--xhttp-mode",
+        help="mode для XHTTP: auto, packet-up, stream-one, stream-up",
+    ),
 ):
-    """Изменить параметры сервера (порт, dest, SNI)."""
+    """Изменить параметры сервера (порт, dest, SNI, транспорт)."""
     init_db()
 
-    if port is None and dest is None and sni is None:
+    if port is None and dest is None and sni is None and network is None:
         console.print(
             "[yellow]Ничего не указано. Используй хотя бы один из: "
-            "--port / --dest / --sni[/yellow]"
+            "--port / --dest / --sni / --network[/yellow]"
         )
+        raise typer.Exit(code=1)
+
+    if network is not None and network not in ("xhttp", "grpc"):
+        console.print("[red]--network должен быть 'xhttp' или 'grpc'.[/red]")
         raise typer.Exit(code=1)
 
     new_sni = None
@@ -230,6 +251,10 @@ def edit_cmd(
                 new_port=port,
                 new_dest=dest,
                 new_server_names=new_sni,
+                new_network=network,
+                grpc_service_name=grpc_service_name,
+                xhttp_path=xhttp_path,
+                xhttp_mode=xhttp_mode,
             )
     except (SSHError, ImportError_) as e:
         console.print(Panel(f"[red]{e}", title="Ошибка"))
@@ -249,6 +274,13 @@ def edit_cmd(
             "SNI",
             ", ".join(result["old_sni"]),
             f"[green]{', '.join(result['new_sni'])}[/green]",
+        )
+
+    if result.get("old_network") != result.get("new_network"):
+        table.add_row(
+            "Транспорт",
+            result["old_network"],
+            f"[green]{result['new_network']}[/green]",
         )
 
     console.print(table)

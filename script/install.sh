@@ -80,7 +80,11 @@ if [ ! -f .env ]; then
     read -rp "Путь к SSH-ключам на этом сервере [/root/.ssh]: " ssh_dir
     ssh_dir="${ssh_dir:-/root/.ssh}"
 
+    read -rp "Публичный URL сервиса (например https://update.rktv.ru) []: " public_url
+    public_url="${public_url:-}"
+
     cat > .env <<EOF
+PUBLIC_URL=${public_url}
 HTTP_PORT=8080
 SSH_DIR=${ssh_dir}
 DEFAULT_SSH_USER=root
@@ -133,6 +137,17 @@ else
     warn "Проверь логи: cd $INSTALL_DIR && docker compose logs -f"
 fi
 
+# ---------- Обёртка xray-manager ----------
+info "Устанавливаю команду xray-manager..."
+WRAPPER_URL="https://raw.githubusercontent.com/${GITHUB_USER}/${REPO_NAME}/refs/heads/main/script/xray-manager"
+if curl -fsSL "$WRAPPER_URL" -o /usr/local/bin/xray-manager; then
+    chmod +x /usr/local/bin/xray-manager
+    ln -sf /usr/local/bin/xray-manager /usr/local/bin/xrm
+    ok "Готова команда: xray-manager (alias xrm)."
+else
+    warn "Не удалось скачать обёртку xray-manager (пропускаю)."
+fi
+
 # ---------- Финальное сообщение ----------
 LOCAL_IP=$(hostname -I | awk '{print $1}')
 echo ""
@@ -142,8 +157,8 @@ echo -e "========================================${NC}"
 echo ""
 echo "Установлен в: $INSTALL_DIR"
 echo ""
-echo "Меню:"
-echo -e "  ${BLUE}cd $INSTALL_DIR && docker compose exec -it xray-manager python main.py${NC}"
+echo "Меню (из любой папки):"
+echo -e "  ${BLUE}xray-manager${NC}"
 echo ""
 echo "HTTP:"
 echo -e "  ${BLUE}http://$LOCAL_IP:8080/docs${NC}"
