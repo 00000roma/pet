@@ -25,6 +25,7 @@ IMAGE="ghcr.io/${GITHUB_USER}/xray-manager:latest"
 INSTALL_DIR="${INSTALL_DIR:-/opt/xray-manager}"
 COMPOSE_URL="https://raw.githubusercontent.com/${GITHUB_USER}/${REPO_NAME}/refs/heads/main/docker-compose.yml"
 ENV_EXAMPLE_URL="https://raw.githubusercontent.com/${GITHUB_USER}/${REPO_NAME}/refs/heads/main/.env.example"
+ROUTING_EXAMPLE_URL="https://raw.githubusercontent.com/${GITHUB_USER}/${REPO_NAME}/refs/heads/main/routing_custom.example.json"
 
 # ---------- Проверки ----------
 if [ "$EUID" -ne 0 ]; then
@@ -60,9 +61,12 @@ cd "$INSTALL_DIR"
 
 # Создаём data/ и копируем шаблон routing_custom, если его нет
 mkdir -p data
-if [ ! -f data/routing_custom.json ] && [ -f routing_custom.example.json ]; then
-    cp routing_custom.example.json data/routing_custom.json
-    ok "Создан data/routing_custom.json из шаблона."
+if [ ! -f data/routing_custom.json ]; then
+    if curl -fsSL "$ROUTING_EXAMPLE_URL" -o data/routing_custom.json; then
+        ok "Создан data/routing_custom.json из шаблона."
+    else
+        warn "Не удалось скачать routing_custom.example.json. Создай data/routing_custom.json вручную."
+    fi
 fi
 
 # ---------- docker-compose.yml ----------

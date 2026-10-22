@@ -7,6 +7,7 @@ routing (блокировка рекламы, direct для РФ, остальн
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -174,6 +175,8 @@ def _build_proxy_outbound(info: _UserServerInfo, tag: str) -> dict:
 
 # ---------- Кастомные правила ----------
 
+logger = logging.getLogger(__name__)
+
 CUSTOM_ROUTING_PATH = Path(
     os.getenv("CUSTOM_ROUTING_PATH", "data/routing_custom.json")
 )
@@ -194,11 +197,27 @@ def _load_custom_routing() -> dict:
     try:
         with CUSTOM_ROUTING_PATH.open("r", encoding="utf-8") as f:
             data = json.load(f)
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(
+            "Не удалось прочитать %s: %s. Использую пустые правила.",
+            CUSTOM_ROUTING_PATH, e,
+        )
+        return empty
+
+    if not isinstance(data, dict):
+        logger.warning(
+            "%s должен быть JSON-объектом. Использую пустые правила.",
+            CUSTOM_ROUTING_PATH,
+        )
         return empty
 
     for key in empty:
         if key not in data or not isinstance(data[key], list):
+            logger.warning(
+                "В %s ключ '%s' отсутствует или не является списком — "
+                "для него использую пустой список.",
+                CUSTOM_ROUTING_PATH, key,
+            )
             data[key] = []
     return data
 
@@ -207,41 +226,17 @@ def _build_routing_rules(default_proxy_tag: str = "proxy") -> list[dict]:
     """
     Собирает правила маршрутизации.
 
+    Порядок обработки: proxy → direct → block → (остальное через proxy).
+    Xray применяет правила сверху вниз, поэтому принудительный proxy
+    имеет приоритет над direct, а direct — над block.
+
     ВАЖНО: Xray применяет логическое И, если в правиле и domain, и ip.
     Поэтому ВСЕГДА разделяем их на отдельные правила.
     """
     custom = _load_custom_routing()
     rules: list[dict] = []
 
-    # 1. Кастомные блокировки — раздельно
-    if custom["block_domains"]:
-        rules.append({
-            "type": "field",
-            "outboundTag": "block",
-            "domain": custom["block_domains"],
-        })
-    if custom["block_ips"]:
-        rules.append({
-            "type": "field",
-            "outboundTag": "block",
-            "ip": custom["block_ips"],
-        })
-
-    # 2. Кастомные direct — раздельно
-    if custom["direct_domains"]:
-        rules.append({
-            "type": "field",
-            "outboundTag": "direct",
-            "domain": custom["direct_domains"],
-        })
-    if custom["direct_ips"]:
-        rules.append({
-            "type": "field",
-            "outboundTag": "direct",
-            "ip": custom["direct_ips"],
-        })
-
-    # 3. Кастомные принудительные proxy — раздельно
+    # 1. Прокси (высший приоритет) — принудительно через VPN
     if custom["proxy_domains"]:
         rules.append({
             "type": "field",
@@ -255,12 +250,19 @@ def _build_routing_rules(default_proxy_tag: str = "proxy") -> list[dict]:
             "ip": custom["proxy_ips"],
         })
 
-    # 4. Стандартные правила — раздельно
-    rules.append({
-        "type": "field",
-        "outboundTag": "block",
-        "domain": ["geosite:category-ads-all"],
-    })
+    # 2. Direct — кастомные + стандартные
+    if custom["direct_domains"]:
+        rules.append({
+            "type": "field",
+            "outboundTag": "direct",
+            "domain": custom["direct_domains"],
+        })
+    if custom["direct_ips"]:
+        rules.append({
+            "type": "field",
+            "outboundTag": "direct",
+            "ip": custom["direct_ips"],
+        })
     rules.append({
         "type": "field",
         "outboundTag": "direct",
@@ -281,7 +283,26 @@ def _build_routing_rules(default_proxy_tag: str = "proxy") -> list[dict]:
         "ip": ["geoip:ru", "geoip:cn"],
     })
 
-    # 5. Финал
+    # 3. Block — кастомные + стандартные (реклама)
+    if custom["block_domains"]:
+        rules.append({
+            "type": "field",
+            "outboundTag": "block",
+            "domain": custom["block_domains"],
+        })
+    if custom["block_ips"]:
+        rules.append({
+            "type": "field",
+            "outboundTag": "block",
+            "ip": custom["block_ips"],
+        })
+    rules.append({
+        "type": "field",
+        "outboundTag": "block",
+        "domain": ["geosite:category-ads-all"],
+    })
+
+    # 4. Финал — всё остальное через proxy
     rules.append({
         "type": "field",
         "network": "tcp,udp",

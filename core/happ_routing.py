@@ -119,7 +119,7 @@ def build_happ_routing(preset: str = "ru", custom_name: str | None = None) -> di
         "RemoteDNSDomain": "https://cloudflare-dns.com/dns-query",
         "RemoteDNSIP": "1.1.1.1",
         "RemoteDNSType": "DoH",
-        "RouteOrder": "block-direct-proxy",
+        "RouteOrder": "proxy-direct-block",
     }
 
 
