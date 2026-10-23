@@ -162,23 +162,21 @@ def render_metrics(metrics: dict, console: Console) -> None:
     )
 
     if speed.get("skipped"):
-        link_t.add_row("Пропускная способность", "[dim]тест пропущен[/dim]", "")
+        link_t.add_row("Скорость интернета (тест)", "[dim]тест пропущен[/dim]", "")
     elif speed.get("error"):
-        link_t.add_row("Пропускная способность", f"[red]{speed['error']}[/red]", "")
+        link_t.add_row("Скорость интернета (тест)", f"[red]{speed['error']}[/red]", "")
     else:
-        mbps = speed.get("mbps")
-        if mbps is None:
-            link_t.add_row("Пропускная способность (тест)", "—", "")
+        down = speed.get("download_mbps")
+        up = speed.get("upload_mbps")
+        if down is None and up is None:
+            link_t.add_row("Скорость интернета (тест)", "—", "")
         else:
-            mbps_s = f"{mbps:.1f} Мбит/с"
-            secs = speed.get("seconds")
-            detail = ""
-            if isinstance(secs, (int, float)):
-                detail = f" ({speed.get('mb')} МБ за {secs:.1f} с)"
+            down_s = f"{down:.1f} Мбит/с" if down is not None else "—"
+            up_s = f"{up:.1f} Мбит/с" if up is not None else "—"
             link_t.add_row(
-                "Пропускная способность (тест)",
-                f"{mbps_s}{detail}",
-                _verdict(_speed_color(mbps)),
+                "Скорость интернета (тест)",
+                f"↓ {down_s} / ↑ {up_s} ({speed.get('mb')} МБ)",
+                _verdict(_speed_color(down if down is not None else up)),
             )
 
     iface = net.get("iface")

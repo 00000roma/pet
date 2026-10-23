@@ -15,7 +15,7 @@ from core.server_manager import (
     edit_server,
     ImportError_,
 )
-from core.monitoring import get_server_metrics
+from core.monitoring import get_server_metrics, SPEED_DEFAULT_MB
 from core.ssh_client import SSHError
 from db.database import init_db, get_session
 from db.models import Server
@@ -207,7 +207,7 @@ def status_cmd(
 @app.command("monitor")
 def monitor_cmd(
     server_id: int = typer.Option(..., "--id", help="ID сервера"),
-    speed_mb: int = typer.Option(10, "--speed-mb", help="Объём теста скорости (МБ)"),
+    speed_mb: int = typer.Option(SPEED_DEFAULT_MB, "--speed-mb", help="Объём теста скорости (МБ)"),
     no_speed: bool = typer.Option(False, "--no-speed", help="Пропустить тест скорости"),
 ):
     """Мониторинг сервера: нагрузка, канал связи, подключения."""

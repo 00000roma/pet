@@ -3,7 +3,7 @@
 
 Собирает только нужные параметры:
   - качество соединения (пинг до сервера и пинг в интернет с сервера);
-  - пропускную способность канала (тест скорости по SSH + текущий Rx/Tx);
+  - пропускную способность канала (тест скорости в интернет + текущий Rx/Tx);
   - нагрузку (load average, ядра CPU, память);
   - сколько пользователей сейчас подключено (активные TCP-соединения).
 
@@ -22,7 +22,7 @@ from db.models import Server
 
 # Максимум объёма теста скорости, чтобы случайно не качать гигабайты.
 SPEED_MAX_MB = 50
-SPEED_DEFAULT_MB = 10
+SPEED_DEFAULT_MB = 25
 
 # Служебные/виртуальные интерфейсы игнорируем при выборе основного.
 _IGNORED_IFACES = re.compile(
@@ -127,30 +127,71 @@ def _measure_ssh_latency(ssh: XrayServer, samples: int = 3):
 
 
 def _measure_speed(ssh: XrayServer, mb: int) -> dict:
-    """Тест пропускной способности SSH-канала (сервер → контроллер).
+    """Тест реальной скорости интернета сервера через CDN Cloudflare.
 
-    Стримит `mb` мегабайт с сервера и замеряет время. Paramiko не включает
-    сжатие, поэтому измеряется реальная пропускная способность канала.
-    Направление «с сервера» совпадает с тем, как сервер отдаёт трафик
-    пользователям (egress).
+    Скачивает и закачивает `mb` МБ с/на speed.cloudflare.com, скорость
+    считает сам curl (`%{speed_download}` / `%{speed_upload}`). Это максимум
+    канала самого сервера (как speedtest), а не канал до контроллера.
+    Никакие пакеты на сервер не ставятся — нужен только curl.
     """
     mb = max(0, min(int(mb), SPEED_MAX_MB))
     if mb <= 0:
-        return {"mb": 0, "mbps": None, "seconds": None, "skipped": True, "error": None}
+        return {
+            "mb": 0, "download_mbps": None, "upload_mbps": None,
+            "skipped": True, "error": None,
+        }
 
-    size = mb * 1024 * 1024
-    t0 = time.perf_counter()
-    res = ssh.run(f"head -c {size} /dev/zero", hide=True, warn=True)
-    dt = time.perf_counter() - t0
+    bytes_ = mb * 1024 * 1024
 
-    if res.failed:
-        err = (res.stderr or "").strip()[:160] or "не удалось выполнить"
-        return {"mb": mb, "mbps": None, "seconds": dt, "skipped": False, "error": err}
-    if dt <= 0:
-        return {"mb": mb, "mbps": None, "seconds": dt, "skipped": False, "error": None}
+    # Без curl тест невозможен.
+    r = ssh.run(
+        "command -v curl >/dev/null 2>&1 && echo yes || echo no",
+        hide=True, warn=True,
+    )
+    if (r.stdout or "").strip() != "yes":
+        return {
+            "mb": mb, "download_mbps": None, "upload_mbps": None,
+            "skipped": False, "error": "на сервере нет curl — тест скорости недоступен",
+        }
 
-    mbps = (size * 8) / dt / 1_000_000
-    return {"mb": mb, "mbps": mbps, "seconds": dt, "skipped": False, "error": None}
+    download = None
+    upload = None
+    errors = []
+
+    # Download: сервер качает с Cloudflare.
+    r = ssh.run(
+        f"curl -s -o /dev/null -w '%{{speed_download}}' --max-time 120 "
+        f"'https://speed.cloudflare.com/__down?bytes={bytes_}'",
+        hide=True, warn=True,
+    )
+    if r.ok:
+        try:
+            download = float((r.stdout or "").strip()) * 8 / 1_000_000
+        except ValueError:
+            download = None
+    else:
+        errors.append((r.stderr or "").strip()[:120] or "download не удался")
+
+    # Upload: сервер заливает на Cloudflare.
+    r = ssh.run(
+        f"head -c {bytes_} /dev/zero | curl -s -o /dev/null -w '%{{speed_upload}}' "
+        f"--max-time 120 -X POST --data-binary @- "
+        f"'https://speed.cloudflare.com/__up'",
+        hide=True, warn=True,
+    )
+    if r.ok:
+        try:
+            upload = float((r.stdout or "").strip()) * 8 / 1_000_000
+        except ValueError:
+            upload = None
+    else:
+        errors.append((r.stderr or "").strip()[:120] or "upload не удался")
+
+    error = "; ".join(errors) if errors else None
+    return {
+        "mb": mb, "download_mbps": download, "upload_mbps": upload,
+        "skipped": False, "error": error,
+    }
 
 
 def _extract_ip(addr: str) -> str:
@@ -213,7 +254,7 @@ def get_server_metrics(server_id: int, speed_mb: int = SPEED_DEFAULT_MB) -> dict
             "min": None, "avg": None, "max": None, "loss_pct": None,
         },
         "speed": {
-            "mb": speed_mb, "mbps": None, "seconds": None,
+            "mb": speed_mb, "download_mbps": None, "upload_mbps": None,
             "skipped": False, "error": None,
         },
         "net": {
@@ -316,7 +357,7 @@ def get_server_metrics(server_id: int, speed_mb: int = SPEED_DEFAULT_MB) -> dict
                     result["net"]["rx_mbps"] = max(0.0, (rx2 - rx1) * 8 / 1_000_000)
                     result["net"]["tx_mbps"] = max(0.0, (tx2 - tx1) * 8 / 1_000_000)
 
-            # Пропускная способность канала (тест).
+            # Скорость интернета сервера (тест).
             result["speed"] = _measure_speed(ssh, speed_mb)
 
     except SSHError as e:
