@@ -35,13 +35,14 @@ def _build_vless_link(
     grpc_service_name: str = "",      # ← для gRPC
     xhttp_path: str = "/xhttp",       # ← для XHTTP
     xhttp_mode: str = "auto",         # ← для XHTTP
+    xhttp_host: str = "",             # ← для XHTTP (HTTP Host header)
     fingerprint: str = "chrome",
 ) -> str:
     """
     Собирает клиентскую ссылку vless:// для Reality + XHTTP/gRPC.
 
     Пример XHTTP:
-      vless://uuid@host:port?type=xhttp&security=reality&pbk=...&fp=chrome&sni=...&sid=...&spx=%2F&path=%2Fxhttp&mode=auto#label
+      vless://uuid@host:port?type=xhttp&security=reality&pbk=...&fp=chrome&sni=...&sid=...&spx=%2F&path=%2Fxhttp&mode=auto&host=example.com#label
 
     Пример gRPC:
       vless://uuid@host:port?type=grpc&security=reality&pbk=...&fp=chrome&sni=...&sid=...&spx=%2F&serviceName=reactive#label
@@ -59,6 +60,8 @@ def _build_vless_link(
     if network == "xhttp":
         params["path"] = xhttp_path
         params["mode"] = xhttp_mode
+        if xhttp_host:
+            params["host"] = xhttp_host
     elif network == "grpc":
         params["serviceName"] = grpc_service_name
 
@@ -106,6 +109,8 @@ def get_user_links(email: str) -> list[UserLink]:
                 grpc_service_name=server.grpc_service_name or "",
                 xhttp_path=server.xhttp_path or "/xhttp",
                 xhttp_mode=server.xhttp_mode or "auto",
+                xhttp_host=server.xhttp_host or "",
+                fingerprint=server.fingerprint or "chrome",
             )
             links.append(
                 UserLink(

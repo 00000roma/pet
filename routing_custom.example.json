@@ -1,5 +1,5 @@
 {
-    "_comment": "Reactive routing rules — шаблон. При первой установке install.sh скопирует этот файл в data/routing_custom.json. Редактируй именно data/routing_custom.json, а не этот файл. Изменения подхватываются при следующем обновлении подписки (Happ/v2rayNG/etc).",
+    "_comment": "Reactive routing rules — шаблон. При первой установке install.sh скопирует этот файл в data/routing_custom.json. Редактируй именно data/routing_custom.json, а не этот файл. Изменения подхватываются при следующем обновлении подписки (Happ/v2rayNG/etc). Поставь replace_defaults: true, чтобы встроенные правила не добавлялись и остались только твои списки.",
     "_format": {
         "domain": "domain:example.com (точно) | domain:*.example.com (и поддомены) | geosite:category-ads-all (готовый список) | regexp:^ads\\. | full:example.com | keyword:ads",
         "ip": "10.0.0.0/8 (CIDR) | 1.2.3.4 (один IP) | geoip:ru (список стран) | geoip:private (локальные)"
@@ -16,5 +16,6 @@
     "block_domains": [],
     "block_ips": [],
     "proxy_domains": [],
-    "proxy_ips": []
+    "proxy_ips": [],
+    "replace_defaults": false
 }

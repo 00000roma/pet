@@ -225,14 +225,29 @@ def edit_cmd(
         None, "--xhttp-mode",
         help="mode для XHTTP: auto, packet-up, stream-one, stream-up",
     ),
+    xhttp_host: str = typer.Option(
+        None, "--xhttp-host",
+        help="Host header для XHTTP (пустая строка — убрать host)",
+    ),
+    fingerprint: str = typer.Option(
+        None, "--fingerprint",
+        help="TLS-отпечаток клиента: chrome, safari, firefox, edge, ios, android, random",
+    ),
 ):
-    """Изменить параметры сервера (порт, dest, SNI, транспорт)."""
+    """Изменить параметры сервера (порт, dest, SNI, транспорт, fingerprint)."""
     init_db()
 
-    if port is None and dest is None and sni is None and network is None:
+    if all(
+        v is None
+        for v in (
+            port, dest, sni, network, grpc_service_name,
+            xhttp_path, xhttp_mode, xhttp_host, fingerprint,
+        )
+    ):
         console.print(
             "[yellow]Ничего не указано. Используй хотя бы один из: "
-            "--port / --dest / --sni / --network[/yellow]"
+            "--port / --dest / --sni / --network / --fingerprint / "
+            "--xhttp-path / --xhttp-mode / --xhttp-host[/yellow]"
         )
         raise typer.Exit(code=1)
 
@@ -255,6 +270,8 @@ def edit_cmd(
                 grpc_service_name=grpc_service_name,
                 xhttp_path=xhttp_path,
                 xhttp_mode=xhttp_mode,
+                xhttp_host=xhttp_host,
+                fingerprint=fingerprint,
             )
     except (SSHError, ImportError_) as e:
         console.print(Panel(f"[red]{e}", title="Ошибка"))
@@ -281,6 +298,34 @@ def edit_cmd(
             "Транспорт",
             result["old_network"],
             f"[green]{result['new_network']}[/green]",
+        )
+
+    if result.get("old_fingerprint") != result.get("new_fingerprint"):
+        table.add_row(
+            "fingerprint",
+            result["old_fingerprint"],
+            f"[green]{result['new_fingerprint']}[/green]",
+        )
+
+    if result.get("old_xhttp_path") != result.get("new_xhttp_path"):
+        table.add_row(
+            "XHTTP path",
+            result["old_xhttp_path"],
+            f"[green]{result['new_xhttp_path']}[/green]",
+        )
+
+    if result.get("old_xhttp_mode") != result.get("new_xhttp_mode"):
+        table.add_row(
+            "XHTTP mode",
+            result["old_xhttp_mode"],
+            f"[green]{result['new_xhttp_mode']}[/green]",
+        )
+
+    if result.get("old_xhttp_host") != result.get("new_xhttp_host"):
+        table.add_row(
+            "XHTTP host",
+            result["old_xhttp_host"] or "(пусто)",
+            f"[green]{result['new_xhttp_host'] or '(пусто)'}[/green]",
         )
 
     console.print(table)

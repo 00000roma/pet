@@ -209,7 +209,7 @@ xray-manager --help
 | `xray-manager server add --host <IP> --key <KEY> [--name <N>] [--dest <D>]` | Развернуть Xray с нуля на чистом сервере |
 | `xray-manager server import --host <IP> --key <KEY> [--name <N>]` | Импортировать существующий сервер (read-only) |
 | `xray-manager server status --id <ID>` | Статус сервера (порт, ping, конфиг) |
-| `xray-manager server edit --id <ID> [--port] [--dest] [--sni] [--network xhttp/grpc]` | Изменить параметры сервера |
+| `xray-manager server edit --id <ID> [--port] [--dest] [--sni] [--network xhttp/grpc] [--fingerprint] [--xhttp-path] [--xhttp-mode] [--xhttp-host]` | Изменить параметры сервера |
 
 **Пользователи** (`user`):
 
@@ -254,6 +254,36 @@ xray-manager
 
 При запуске меню выводятся пути к ключевым файлам (БД, правила routing, `.env`, файл для `add-bulk`). Пункт **«Показать ссылки пользователя»** выводит одну короткую ссылку с токеном вида `https://.../go/{token}` — удобно копировать и отдавать пользователю.
 
+### Настройка Reality fingerprint и XHTTP (на сервер)
+
+У каждого сервера могут быть **свои** TLS-отпечаток (`fingerprint`) и **свои** XHTTP-параметры (`path`, `mode`, `host`). Значения хранятся в БД и подставляются в vless-ссылки и клиентский JSON-конфиг.
+
+| Параметр | Значения | По умолчанию |
+|---|---|---|
+| `--fingerprint` | `chrome`, `safari`, `firefox`, `edge`, `ios`, `android`, `random` | `chrome` |
+| `--xhttp-path` | путь (например `/xhttp`) | `/xhttp` |
+| `--xhttp-mode` | `auto`, `packet-up`, `stream-one`, `stream-up` | `auto` |
+| `--xhttp-host` | HTTP Host-заголовок (пустая строка — не указывать) | пусто |
+
+**Примеры:**
+
+```bash
+# fingerprint + mode
+xray-manager server edit --id <ID> --fingerprint safari --xhttp-mode stream-one
+
+# path + host
+xray-manager server edit --id <ID> --xhttp-path /cdn --xhttp-host cdn.example.com
+
+# убрать Host
+xray-manager server edit --id <ID> --xhttp-host ""
+```
+
+То же самое можно сделать через меню: `xray-manager` → «Серверы» → «Редактировать сервер» (пункты `fingerprint`, `XHTTP path`, `XHTTP mode`, `XHTTP host`).
+
+После изменения Xray на сервере перезапускается автоматически; подписки обновятся при следующем обновлении у клиента.
+
+> ⚠️ Если `config.json` правился на сервере **вручную** (не через `server edit`), выполни `server edit` ещё раз с нужными значениями — ссылки читают данные из БД, а не напрямую из `config.json`.
+
 ---
 
 ## 🌐 Эндпоинты HTTP-сервиса
@@ -285,6 +315,7 @@ https://sub.example.com/go/<USER_TOKEN>
 
 ```json
 {
+    "replace_defaults": false,
     "direct_domains": ["domain:example.com", "domain:internal.example.com"],
     "direct_ips": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"],
     "block_domains": [],
@@ -309,11 +340,38 @@ https://sub.example.com/go/<USER_TOKEN>
 - **`block_domains`** — **блокируются** (**реклама**, **трекеры**).
 - **`proxy_domains`** — **принудительно** **через VPN**.
 - **`proxy_ips`** — **IP** **через VPN** (**для** **сервисов** **вроде** **Telegram**).
+- **`replace_defaults`** — **`true`** **отключает** **встроенные** **правила** (**полный** **контроль** **через** **этот** **файл**).
 
 **Порядок** **применения** — `proxy → direct → block`:
 1. `proxy_*` — **высший** **приоритет** (**принудительно** **через VPN**).
 2. `direct_*` — **напрямую** (**если** **домен** **есть** **и** **в** **direct**, **и** **в** **block** — **пойдёт** **напрямую**).
 3. `block_*` — **блокировка** (**самый** **низкий** **приоритет**).
+
+### Полное управление списками (`replace_defaults`)
+
+По умолчанию к твоим спискам из `routing_custom.json` **добавляются** встроенные
+правила: в Happ — `geosite:private`, `geosite:category-gov-ru`, `geosite:category-ru`,
+`geosite:cn`, `geoip:ru`, `geoip:cn`, `geosite:category-ads-all`; в JSON-конфиге Xray —
+аналогичные стандартные direct/block-правила. Поэтому удаление записи из
+`routing_custom.json` не убирает встроенное правило — оно «воскресает» из пресета.
+
+Чтобы `routing_custom.json` стал **единственным источником** правил, добавь:
+
+```json
+{
+    "replace_defaults": true,
+    "direct_domains": [...],
+    "direct_ips": [...],
+    "block_domains": [...],
+    "block_ips": [...],
+    "proxy_domains": [...],
+    "proxy_ips": [...]
+}
+```
+
+При `"replace_defaults": true` встроенные списки игнорируются — остаются только твои.
+⚠️ Не забудь оставить `geoip:private` / `geosite:private`, иначе локальная сеть
+пойдёт через VPN.
 
 ### Формат доменов
 

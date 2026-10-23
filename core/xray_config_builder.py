@@ -38,6 +38,7 @@ class _UserServerInfo:
     grpc_service_name: str = ""     # ← для gRPC
     xhttp_path: str = "/xhttp"      # ← для XHTTP
     xhttp_mode: str = "auto"        # ← для XHTTP
+    xhttp_host: str = ""            # ← для XHTTP (HTTP Host header)
     fingerprint: str = "chrome"
     spider_x: str = "/"
     security: str = "reality"
@@ -82,6 +83,8 @@ def _fetch_user_servers(email: str) -> tuple[str, list[_UserServerInfo]]:
                     grpc_service_name=server.grpc_service_name or "",
                     xhttp_path=server.xhttp_path or "/xhttp",
                     xhttp_mode=server.xhttp_mode or "auto",
+                    xhttp_host=server.xhttp_host or "",
+                    fingerprint=server.fingerprint or "chrome",
                 )
             )
         if not result:
@@ -142,10 +145,13 @@ def _build_proxy_outbound(info: _UserServerInfo, tag: str) -> dict:
 
     # Транспорт — XHTTP или gRPC
     if info.network == "xhttp":
-        stream_settings["xhttpSettings"] = {
+        xhttp_settings = {
             "path": info.xhttp_path,
             "mode": info.xhttp_mode,
         }
+        if info.xhttp_host:
+            xhttp_settings["host"] = info.xhttp_host
+        stream_settings["xhttpSettings"] = xhttp_settings
     elif info.network == "grpc":
         stream_settings["grpcSettings"] = {
             "serviceName": info.grpc_service_name,
@@ -232,8 +238,13 @@ def _build_routing_rules(default_proxy_tag: str = "proxy") -> list[dict]:
 
     ВАЖНО: Xray применяет логическое И, если в правиле и domain, и ip.
     Поэтому ВСЕГДА разделяем их на отдельные правила.
+
+    Если в routing_custom.json указано "replace_defaults": true, стандартные
+    direct/block-правила (geoip:private, geosite:cn, geoip:ru,
+    geosite:category-ads-all и т.п.) не добавляются.
     """
     custom = _load_custom_routing()
+    replace_defaults = custom.get("replace_defaults") is True
     rules: list[dict] = []
 
     # 1. Прокси (высший приоритет) — принудительно через VPN
@@ -263,25 +274,26 @@ def _build_routing_rules(default_proxy_tag: str = "proxy") -> list[dict]:
             "outboundTag": "direct",
             "ip": custom["direct_ips"],
         })
-    rules.append({
-        "type": "field",
-        "outboundTag": "direct",
-        "ip": ["geoip:private"],
-    })
-    rules.append({
-        "type": "field",
-        "outboundTag": "direct",
-        "domain": [
-            "geosite:category-gov-ru",
-            "geosite:cn",
-            "geosite:private",
-        ],
-    })
-    rules.append({
-        "type": "field",
-        "outboundTag": "direct",
-        "ip": ["geoip:ru", "geoip:cn"],
-    })
+    if not replace_defaults:
+        rules.append({
+            "type": "field",
+            "outboundTag": "direct",
+            "ip": ["geoip:private"],
+        })
+        rules.append({
+            "type": "field",
+            "outboundTag": "direct",
+            "domain": [
+                "geosite:category-gov-ru",
+                "geosite:cn",
+                "geosite:private",
+            ],
+        })
+        rules.append({
+            "type": "field",
+            "outboundTag": "direct",
+            "ip": ["geoip:ru", "geoip:cn"],
+        })
 
     # 3. Block — кастомные + стандартные (реклама)
     if custom["block_domains"]:
@@ -296,11 +308,12 @@ def _build_routing_rules(default_proxy_tag: str = "proxy") -> list[dict]:
             "outboundTag": "block",
             "ip": custom["block_ips"],
         })
-    rules.append({
-        "type": "field",
-        "outboundTag": "block",
-        "domain": ["geosite:category-ads-all"],
-    })
+    if not replace_defaults:
+        rules.append({
+            "type": "field",
+            "outboundTag": "block",
+            "domain": ["geosite:category-ads-all"],
+        })
 
     # 4. Финал — всё остальное через proxy
     rules.append({

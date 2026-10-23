@@ -97,6 +97,8 @@ def import_existing_server(
             grpc_service_name=inbound.grpc_service_name,
             xhttp_path=inbound.xhttp_path,
             xhttp_mode=inbound.xhttp_mode,
+            xhttp_host=inbound.xhttp_host,
+            fingerprint=inbound.fingerprint,
             reality_dest=inbound.dest,
             reality_server_names=json.dumps(inbound.server_names),
             reality_private_key=inbound.private_key,
@@ -284,6 +286,8 @@ def deploy_fresh(
             network="xhttp",
             xhttp_path="/xhttp",
             xhttp_mode="auto",
+            xhttp_host="",
+            fingerprint="chrome",
             reality_dest=dest,
             reality_server_names=json.dumps(server_names),
             reality_private_key=private_key,
@@ -399,6 +403,8 @@ def edit_server(
     grpc_service_name: str | None = None,
     xhttp_path: str | None = None,
     xhttp_mode: str | None = None,
+    xhttp_host: str | None = None,
+    fingerprint: str | None = None,
 ) -> dict:
     """
     Меняет параметры существующего сервера:
@@ -406,6 +412,8 @@ def edit_server(
       - dest (маскировочный сайт)
       - serverNames (SNI)
       - транспорт (xhttp | grpc)
+      - XHTTP path / mode / host
+      - fingerprint (TLS-отпечаток клиента, fp в ссылке)
 
     Обновляет config.json на сервере и БД.
     Перезапускает Xray.
@@ -416,6 +424,9 @@ def edit_server(
         raise ImportError_(
             f"Неподдерживаемый транспорт: {new_network} (нужно 'xhttp' или 'grpc')"
         )
+
+    if fingerprint is not None:
+        fingerprint = fingerprint.strip()
 
     session = get_session()
     try:
@@ -430,10 +441,8 @@ def edit_server(
         old_grpc_service_name = server.grpc_service_name or ""
         old_xhttp_path = server.xhttp_path or "/xhttp"
         old_xhttp_mode = server.xhttp_mode or "auto"
-
-        resolved_grpc = grpc_service_name or server.grpc_service_name or "reactive"
-        resolved_xhttp_path = xhttp_path or server.xhttp_path or "/xhttp"
-        resolved_xhttp_mode = xhttp_mode or server.xhttp_mode or "auto"
+        old_xhttp_host = server.xhttp_host or ""
+        old_fingerprint = server.fingerprint or "chrome"
 
         ssh = XrayServer(
             host=server.host,
@@ -443,24 +452,93 @@ def edit_server(
         )
 
         with ssh.session():
-            # 1. Читаем текущий конфиг
+            # Читаем текущий конфиг и реальные параметры с сервера.
+            # БД могла рассинхронизироваться с config.json (например, после
+            # ручной правки), поэтому для резолва используем именно сервер.
             config_text = ssh.read_config_auto()
+            inbound = parse_config(config_text)
+            actual_network = inbound.network or "xhttp"
 
-            # 2. Модифицируем
+            xhttp_requested = (
+                xhttp_path is not None
+                or xhttp_mode is not None
+                or xhttp_host is not None
+            )
+
+            if new_network is not None:
+                target_network = new_network
+            elif xhttp_requested:
+                target_network = "xhttp"
+            elif grpc_service_name is not None:
+                target_network = "grpc"
+            else:
+                target_network = actual_network
+
+            if target_network == "grpc" and xhttp_requested:
+                raise ImportError_(
+                    "Конфликт параметров: gRPC нельзя совмещать с XHTTP path/mode/host."
+                )
+            if new_network == "xhttp" and grpc_service_name is not None:
+                raise ImportError_(
+                    "Нельзя указать --network xhttp вместе с --grpc-service-name."
+                )
+
+            resolved_grpc = (
+                grpc_service_name
+                if grpc_service_name is not None
+                else (inbound.grpc_service_name or server.grpc_service_name or "reactive")
+            )
+            resolved_xhttp_path = (
+                xhttp_path
+                if xhttp_path is not None
+                else (inbound.xhttp_path or server.xhttp_path or "/xhttp")
+            )
+            resolved_xhttp_mode = (
+                xhttp_mode
+                if xhttp_mode is not None
+                else (inbound.xhttp_mode or server.xhttp_mode or "auto")
+            )
+            resolved_xhttp_host = (
+                xhttp_host
+                if xhttp_host is not None
+                else (inbound.xhttp_host or server.xhttp_host or "")
+            )
+            resolved_fingerprint = (
+                fingerprint or inbound.fingerprint or server.fingerprint or "chrome"
+            )
+
+            transport_changed = (
+                new_network is not None
+                or grpc_service_name is not None
+                or xhttp_requested
+            )
+
+            # Модифицируем Reality-параметры (порт, dest, SNI, fingerprint)
             updated = update_reality_settings(
                 config_text,
                 new_port=new_port,
                 new_dest=new_dest,
                 new_server_names=new_server_names,
+                new_fingerprint=(fingerprint or None),
             )
 
-            if new_network is not None:
+            # Модифицируем транспорт
+            if transport_changed:
                 updated = update_transport(
                     updated,
-                    new_network=new_network,
-                    grpc_service_name=resolved_grpc,
-                    xhttp_path=resolved_xhttp_path,
-                    xhttp_mode=resolved_xhttp_mode,
+                    new_network=target_network,
+                    grpc_service_name=(
+                        resolved_grpc if target_network == "grpc" else None
+                    ),
+                    xhttp_path=(
+                        resolved_xhttp_path if target_network == "xhttp" else None
+                    ),
+                    xhttp_mode=(
+                        resolved_xhttp_mode if target_network == "xhttp" else None
+                    ),
+                    xhttp_host=(
+                        resolved_xhttp_host if target_network == "xhttp" else None
+                    ),
                 )
 
             # 3. Валидируем (записываем во временный файл и проверяем)
@@ -501,14 +579,17 @@ def edit_server(
             server.reality_dest = new_dest
         if new_server_names is not None:
             server.reality_server_names = json.dumps(list(new_server_names))
+        if fingerprint:
+            server.fingerprint = resolved_fingerprint
 
-        if new_network is not None:
-            server.network = new_network
-            if new_network == "grpc":
+        if transport_changed:
+            server.network = target_network
+            if target_network == "grpc":
                 server.grpc_service_name = resolved_grpc
             else:
                 server.xhttp_path = resolved_xhttp_path
                 server.xhttp_mode = resolved_xhttp_mode
+                server.xhttp_host = resolved_xhttp_host
 
         session.commit()
 
@@ -522,6 +603,8 @@ def edit_server(
             "new_dest": server.reality_dest,
             "old_sni": old_sni,
             "new_sni": list(json.loads(server.reality_server_names or "[]")),
+            "old_fingerprint": old_fingerprint,
+            "new_fingerprint": server.fingerprint or "chrome",
             "old_network": old_network,
             "new_network": server.network or "xhttp",
             "old_grpc_service_name": old_grpc_service_name,
@@ -530,6 +613,8 @@ def edit_server(
             "new_xhttp_path": server.xhttp_path or "/xhttp",
             "old_xhttp_mode": old_xhttp_mode,
             "new_xhttp_mode": server.xhttp_mode or "auto",
+            "old_xhttp_host": old_xhttp_host,
+            "new_xhttp_host": server.xhttp_host or "",
         }
     finally:
         session.close()

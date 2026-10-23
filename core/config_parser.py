@@ -19,6 +19,8 @@ class RealityInbound:
     grpc_service_name: str = ""      # для gRPC
     xhttp_path: str = "/xhttp"       # для XHTTP
     xhttp_mode: str = "auto"         # для XHTTP
+    xhttp_host: str = ""             # для XHTTP (HTTP Host header)
+    fingerprint: str = "chrome"      # TLS-отпечаток клиента (fp в ссылке)
     clients: list[dict] = field(default_factory=list)
     raw: dict = field(default_factory=dict)
 
@@ -57,6 +59,8 @@ def parse_config(config_text: str) -> RealityInbound:
         network = stream.get("network", "tcp")
         grpc_settings = stream.get("grpcSettings", {}) or {}
         xhttp_settings = stream.get("xhttpSettings", {}) or {}
+        fingerprint = (reality.get("fingerprint") or "chrome")
+        xhttp_host = (xhttp_settings.get("host") or "")
 
         return RealityInbound(
             port=int(inbound.get("port", 443)),
@@ -69,6 +73,8 @@ def parse_config(config_text: str) -> RealityInbound:
             grpc_service_name=grpc_settings.get("serviceName", ""),
             xhttp_path=xhttp_settings.get("path", "/xhttp"),
             xhttp_mode=xhttp_settings.get("mode", "auto"),
+            xhttp_host=xhttp_host,
+            fingerprint=fingerprint,
             clients=copy.deepcopy(clients),
             raw=copy.deepcopy(inbound),
         )
@@ -127,12 +133,14 @@ def update_reality_settings(
     new_port: int | None = None,
     new_dest: str | None = None,
     new_server_names: list[str] | None = None,
+    new_fingerprint: str | None = None,
 ) -> str:
     """
     Меняет параметры Reality inbound:
       - port: внешний порт
       - dest: адрес маскировки
       - serverNames: список SNI
+      - fingerprint: TLS-отпечаток клиента (chrome/safari/firefox/...)
 
     None означает "не менять".
     Возвращает обновлённый JSON.
@@ -152,6 +160,9 @@ def update_reality_settings(
     if new_server_names is not None:
         reality["serverNames"] = list(new_server_names)
 
+    if new_fingerprint is not None:
+        reality["fingerprint"] = new_fingerprint
+
     return json.dumps(data, indent=2, ensure_ascii=False)
 
 
@@ -162,6 +173,7 @@ def update_transport(
     grpc_service_name: str | None = None,
     xhttp_path: str | None = None,
     xhttp_mode: str | None = None,
+    xhttp_host: str | None = None,
 ) -> str:
     """
     Меняет транспорт VLESS+Reality inbound (xhttp | grpc).
@@ -187,10 +199,13 @@ def update_transport(
     stream.pop("xhttpSettings", None)
 
     if new_network == "xhttp":
-        stream["xhttpSettings"] = {
+        xhttp_settings = {
             "mode": xhttp_mode or "auto",
             "path": xhttp_path or "/xhttp",
         }
+        if xhttp_host:
+            xhttp_settings["host"] = xhttp_host
+        stream["xhttpSettings"] = xhttp_settings
     else:  # grpc
         stream["grpcSettings"] = {
             "serviceName": grpc_service_name or "reactive",

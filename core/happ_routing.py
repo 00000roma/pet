@@ -78,6 +78,9 @@ def build_happ_routing(preset: str = "ru", custom_name: str | None = None) -> di
     Строит routing для Happ:
     - базовые правила пресета (geosite/geoip)
     - кастомные правила из data/routing_custom.json (domain:rktv.ru и т.п.)
+
+    Если в routing_custom.json указано "replace_defaults": true, встроенные
+    правила пресета игнорируются — используются только кастомные списки.
     """
     from core.xray_config_builder import _load_custom_routing
 
@@ -87,14 +90,23 @@ def build_happ_routing(preset: str = "ru", custom_name: str | None = None) -> di
     base = ROUTING_PRESETS[preset]
     custom = _load_custom_routing()
 
-    # Объединяем базовые + кастомные, убираем дубликаты
-    def merge(a, b):
-        return list(dict.fromkeys(a + b))
+    # Если пользователь хочет полностью управлять списками через routing_custom.json,
+    # игнорируем встроенные правила пресета. Иначе встроенные geosite/geoip нельзя убрать,
+    # и они будут "воскресать" даже после удаления из routing_custom.json.
+    if custom.get("replace_defaults") is True:
+        direct_sites = list(custom.get("direct_domains", []))
+        direct_ips = list(custom.get("direct_ips", []))
+        block_sites = list(custom.get("block_domains", []))
+        block_ips = list(custom.get("block_ips", []))
+    else:
+        # Объединяем базовые + кастомные, убираем дубликаты
+        def merge(a, b):
+            return list(dict.fromkeys(a + b))
 
-    direct_sites = merge(base["direct_sites"], custom.get("direct_domains", []))
-    direct_ips = merge(base["direct_ips"], custom.get("direct_ips", []))
-    block_sites = merge(base["block_sites"], custom.get("block_domains", []))
-    block_ips = merge(base["block_ips"], custom.get("block_ips", []))
+        direct_sites = merge(base["direct_sites"], custom.get("direct_domains", []))
+        direct_ips = merge(base["direct_ips"], custom.get("direct_ips", []))
+        block_sites = merge(base["block_sites"], custom.get("block_domains", []))
+        block_ips = merge(base["block_ips"], custom.get("block_ips", []))
 
     return {
         "BlockIp": block_ips,

@@ -11,3 +11,6 @@ __pycache__/
 *.tar.gz
 xray-manager.tar
 data/routing_custom.json
+
+# Личная инструкция администратора (не пушить в GitHub)
+INSTRUCTION.md

@@ -78,6 +78,10 @@ def _migrate_schema() -> None:
             _add_column("servers", "xhttp_path VARCHAR(64) DEFAULT '/xhttp'")
         if "xhttp_mode" not in cols:
             _add_column("servers", "xhttp_mode VARCHAR(16) DEFAULT 'auto'")
+        if "xhttp_host" not in cols:
+            _add_column("servers", "xhttp_host VARCHAR(128) DEFAULT ''")
+        if "fingerprint" not in cols:
+            _add_column("servers", "fingerprint VARCHAR(32) DEFAULT 'chrome'")
         if "managed" not in cols:
             _add_column("servers", "managed BOOLEAN DEFAULT 1")
 

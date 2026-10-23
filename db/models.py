@@ -29,6 +29,8 @@ class Server(Base):
     grpc_service_name: Mapped[str] = mapped_column(String(64), default="")
     xhttp_path: Mapped[str] = mapped_column(String(64), default="/xhttp")
     xhttp_mode: Mapped[str] = mapped_column(String(16), default="auto")
+    xhttp_host: Mapped[str] = mapped_column(String(128), default="")
+    fingerprint: Mapped[str] = mapped_column(String(32), default="chrome")
 
     reality_dest: Mapped[str] = mapped_column(String(128), default="")
     reality_server_names: Mapped[str] = mapped_column(Text, default="[]")

@@ -295,6 +295,10 @@ def _servers_edit() -> None:
         current_dest = server.reality_dest
         current_sni = ", ".join(json.loads(server.reality_server_names or "[]"))
         current_network = server.network or "xhttp"
+        current_fingerprint = server.fingerprint or "chrome"
+        current_xhttp_path = server.xhttp_path or "/xhttp"
+        current_xhttp_mode = server.xhttp_mode or "auto"
+        current_xhttp_host = server.xhttp_host or ""
     finally:
         session.close()
 
@@ -302,7 +306,11 @@ def _servers_edit() -> None:
     console.print(f"[dim]Текущий порт: {current_port}[/dim]")
     console.print(f"[dim]Текущий dest: {current_dest}[/dim]")
     console.print(f"[dim]Текущий SNI:  {current_sni}[/dim]")
-    console.print(f"[dim]Текущий транспорт: {current_network}[/dim]\n")
+    console.print(f"[dim]Текущий транспорт: {current_network}[/dim]")
+    console.print(f"[dim]Текущий fingerprint: {current_fingerprint}[/dim]")
+    console.print(f"[dim]Текущий XHTTP path: {current_xhttp_path}[/dim]")
+    console.print(f"[dim]Текущий XHTTP mode: {current_xhttp_mode}[/dim]")
+    console.print(f"[dim]Текущий XHTTP host: {current_xhttp_host or '(пусто)'}[/dim]\n")
 
     # Спрашиваем, что менять
     field = questionary.select(
@@ -312,6 +320,10 @@ def _servers_edit() -> None:
             "dest (маскировочный сайт)",
             "SNI (serverNames)",
             "Транспорт (XHTTP / gRPC)",
+            "fingerprint (TLS-отпечаток)",
+            "XHTTP path",
+            "XHTTP mode",
+            "XHTTP host",
             "Отмена",
         ],
         style=CUSTOM_STYLE,
@@ -320,9 +332,7 @@ def _servers_edit() -> None:
     if field is None or field == "Отмена":
         return
 
-    new_port = None
-    new_dest = None
-    new_sni = None
+    kwargs: dict = {}
 
     if field == "Транспорт (XHTTP / gRPC)":
         _servers_change_transport(sid=sid)
@@ -335,7 +345,7 @@ def _servers_edit() -> None:
             style=CUSTOM_STYLE,
         ).ask()
         try:
-            new_port = int(new_port_str)
+            kwargs["new_port"] = int(new_port_str)
         except (ValueError, TypeError):
             _error("Порт должен быть числом.")
             return
@@ -347,6 +357,7 @@ def _servers_edit() -> None:
         ).ask()
         if not new_dest:
             return
+        kwargs["new_dest"] = new_dest
     elif field == "SNI (serverNames)":
         new_sni_str = questionary.text(
             "Новый SNI (через запятую, если несколько):",
@@ -355,7 +366,48 @@ def _servers_edit() -> None:
         ).ask()
         if not new_sni_str:
             return
-        new_sni = [s.strip() for s in new_sni_str.split(",") if s.strip()]
+        kwargs["new_server_names"] = [s.strip() for s in new_sni_str.split(",") if s.strip()]
+    elif field == "fingerprint (TLS-отпечаток)":
+        new_fp = questionary.text(
+            "fingerprint (chrome, safari, firefox, edge, ios, android, random):",
+            default=current_fingerprint,
+            style=CUSTOM_STYLE,
+        ).ask()
+        if not new_fp:
+            return
+        kwargs["fingerprint"] = new_fp.strip()
+    elif field == "XHTTP path":
+        new_path = questionary.text(
+            "Новый XHTTP path:",
+            default=current_xhttp_path,
+            style=CUSTOM_STYLE,
+        ).ask()
+        if new_path is None:
+            return
+        kwargs["xhttp_path"] = new_path.strip() or "/xhttp"
+    elif field == "XHTTP mode":
+        new_mode = questionary.select(
+            "Новый XHTTP mode:",
+            choices=["auto", "packet-up", "stream-one", "stream-up"],
+            default=(
+                current_xhttp_mode
+                if current_xhttp_mode in ("auto", "packet-up", "stream-one", "stream-up")
+                else "auto"
+            ),
+            style=CUSTOM_STYLE,
+        ).ask()
+        if new_mode is None:
+            return
+        kwargs["xhttp_mode"] = new_mode
+    elif field == "XHTTP host":
+        new_host = questionary.text(
+            "XHTTP host (пусто — не указывать Host header):",
+            default=current_xhttp_host,
+            style=CUSTOM_STYLE,
+        ).ask()
+        if new_host is None:
+            return
+        kwargs["xhttp_host"] = new_host.strip()
 
     # Подтверждение
     confirm = questionary.confirm(
@@ -368,12 +420,7 @@ def _servers_edit() -> None:
 
     try:
         with console.status("[cyan]Обновляю сервер...[/cyan]"):
-            result = edit_server(
-                server_id=sid,
-                new_port=new_port,
-                new_dest=new_dest,
-                new_server_names=new_sni,
-            )
+            result = edit_server(server_id=sid, **kwargs)
     except (SSHError, ImportError_, Exception) as e:
         _error(str(e))
         return
@@ -392,6 +439,36 @@ def _servers_edit() -> None:
             "SNI",
             ", ".join(result["old_sni"]),
             f"[green]{', '.join(result['new_sni'])}[/green]",
+        )
+    if result.get("old_fingerprint") != result.get("new_fingerprint"):
+        table.add_row(
+            "fingerprint",
+            result["old_fingerprint"],
+            f"[green]{result['new_fingerprint']}[/green]",
+        )
+    if result.get("old_network") != result.get("new_network"):
+        table.add_row(
+            "Транспорт",
+            result["old_network"],
+            f"[green]{result['new_network']}[/green]",
+        )
+    if result.get("old_xhttp_path") != result.get("new_xhttp_path"):
+        table.add_row(
+            "XHTTP path",
+            result["old_xhttp_path"],
+            f"[green]{result['new_xhttp_path']}[/green]",
+        )
+    if result.get("old_xhttp_mode") != result.get("new_xhttp_mode"):
+        table.add_row(
+            "XHTTP mode",
+            result["old_xhttp_mode"],
+            f"[green]{result['new_xhttp_mode']}[/green]",
+        )
+    if result.get("old_xhttp_host") != result.get("new_xhttp_host"):
+        table.add_row(
+            "XHTTP host",
+            result["old_xhttp_host"] or "(пусто)",
+            f"[green]{result['new_xhttp_host'] or '(пусто)'}[/green]",
         )
 
     console.print(table)
