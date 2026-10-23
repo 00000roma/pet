@@ -15,9 +15,11 @@ from core.server_manager import (
     edit_server,
     ImportError_,
 )
+from core.monitoring import get_server_metrics
 from core.ssh_client import SSHError
 from db.database import init_db, get_session
 from db.models import Server
+from cli.monitoring_view import render_metrics
 
 app = typer.Typer(help="Управление серверами Xray")
 console = Console()
@@ -200,6 +202,25 @@ def status_cmd(
         table.add_row("[red]Ошибка[/red]", f"[red]{result['error']}[/red]")
 
     console.print(table)
+
+
+@app.command("monitor")
+def monitor_cmd(
+    server_id: int = typer.Option(..., "--id", help="ID сервера"),
+    speed_mb: int = typer.Option(10, "--speed-mb", help="Объём теста скорости (МБ)"),
+    no_speed: bool = typer.Option(False, "--no-speed", help="Пропустить тест скорости"),
+):
+    """Мониторинг сервера: нагрузка, канал связи, подключения."""
+    init_db()
+    try:
+        with console.status(f"[cyan]Собираю метрики сервера id={server_id}...[/cyan]"):
+            metrics = get_server_metrics(server_id, speed_mb=0 if no_speed else speed_mb)
+    except Exception as e:
+        console.print(Panel(f"[red]{e}", title="Ошибка мониторинга"))
+        raise typer.Exit(code=1)
+
+    render_metrics(metrics, console)
+
 
 @app.command("edit")
 def edit_cmd(

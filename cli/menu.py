@@ -22,6 +22,8 @@ from core.server_manager import (
     ImportError_,
 )
 from core.ssh_client import SSHError
+from core.monitoring import get_server_metrics
+from cli.monitoring_view import render_metrics
 from core.user_manager import (
     add_user,
     remove_user,
@@ -162,6 +164,7 @@ def servers_menu() -> None:
                 "Список серверов",
                 "Добавить новый сервер",
                 "Импортировать существующий",
+                "Мониторинг сервера",
                 "Проверить статус сервера",
                 "Редактировать сервер",
                 "Сменить транспорт (gRPC ↔ XHTTP)",
@@ -182,6 +185,9 @@ def servers_menu() -> None:
             _pause()
         elif choice == "Импортировать существующий":
             _servers_import()
+            _pause()
+        elif choice == "Мониторинг сервера":
+            _servers_monitor()
             _pause()
         elif choice == "Проверить статус сервера":   # ← НОВАЯ ОБРАБОТКА
             _servers_status()
@@ -223,6 +229,28 @@ def _servers_list() -> None:
             ", ".join(json.loads(s.reality_server_names or "[]")),
         )
     console.print(table)
+
+def _servers_monitor() -> None:
+    choices = _server_choices()
+    if not choices:
+        console.print("[yellow]Серверов нет.[/yellow]")
+        return
+    sid = questionary.select(
+        "Какой сервер мониторить?",
+        choices=choices,
+        style=CUSTOM_STYLE,
+        instruction="(↑↓ — навигация, Enter — выбрать)",
+    ).ask()
+    if sid is None:
+        return
+    try:
+        with console.status(f"[cyan]Собираю метрики сервера id={sid}...[/cyan]"):
+            metrics = get_server_metrics(sid)
+    except Exception as e:
+        _error(str(e))
+        return
+    render_metrics(metrics, console)
+
 
 def _servers_status() -> None:
     choices = _server_choices()

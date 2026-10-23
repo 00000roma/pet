@@ -209,6 +209,7 @@ xray-manager --help
 | `xray-manager server add --host <IP> --key <KEY> [--name <N>] [--dest <D>]` | Развернуть Xray с нуля на чистом сервере |
 | `xray-manager server import --host <IP> --key <KEY> [--name <N>]` | Импортировать существующий сервер (read-only) |
 | `xray-manager server status --id <ID>` | Статус сервера (порт, ping, конфиг) |
+| `xray-manager server monitor --id <ID> [--speed-mb N] [--no-speed]` | Мониторинг: нагрузка, канал связи, подключения |
 | `xray-manager server edit --id <ID> [--port] [--dest] [--sni] [--network xhttp/grpc] [--fingerprint] [--xhttp-path] [--xhttp-mode] [--xhttp-host]` | Изменить параметры сервера |
 
 **Пользователи** (`user`):
